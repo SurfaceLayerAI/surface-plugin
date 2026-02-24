@@ -50,14 +50,34 @@ Claude Code persists session transcripts to `~/.claude/projects/<project>/<sessi
 | `assistant` (text) | `message.content[].text` | Agent's visible reasoning shared with the user |
 | `assistant` (tool_use) | `message.content[].name`, `.input` | Plan file writes (`Write` tool to `plans/` paths), file exploration (`Read`, `Grep`, `Glob`), task decomposition (`TodoWrite`) |
 | `user` | `content` | Original task request, plan feedback/rejections |
+| `assistant` (tool_use: `Task`) | `message.content[].input.subagent_type`, `.input.prompt` | Plan subagent delegation: when and why the orchestrating agent spawned a Plan agent |
+| `queue-operation` | `agentId` | Links `Task` tool calls to subagent transcript paths at `<session-dir>/subagents/agent-<agentId>.jsonl` |
 
 #### Subagent transcripts
 
-Claude Code subagents (spawned via the `Task` tool) produce separate transcripts. The `SubagentStop` hook provides `agent_transcript_path`.
+Claude Code subagents (spawned via the `Task` tool) produce separate transcripts at `<session-dir>/subagents/agent-<agentId>.jsonl`. The main session transcript and Plan subagent transcripts capture different layers of reasoning. Both are necessary because the orchestrating agent and the Plan agent operate at different levels of abstraction.
 
-**v0: main session transcript only.** The main transcript captures the orchestrating agent's high-level reasoning: why it delegated, what it expected, and results returned. Design decisions and tradeoffs live here. Subagent transcripts contain implementation detail, not strategic reasoning.
+| | Main session transcript | Plan subagent transcript |
+|---|---|---|
+| **What it records** | The orchestrating agent's decisions: entering plan mode, delegating to the Plan agent, receiving the finished plan, acting on it. User interactions (the original request, plan feedback/rejections, approval). Thinking blocks with high-level tradeoff reasoning. | The Plan agent's working process: exploration tool calls (Read, Grep, Glob, Bash), step-by-step analysis in text responses, intermediate conclusions, and the final synthesized plan. |
+| **Level of abstraction** | Strategic: what to do and why (user intent, tradeoff negotiation, plan acceptance/rejection) | Tactical: how the plan formed (what code the agent read, what patterns it found, what alternatives it considered during exploration) |
+| **Unique signals** | User request, plan rejections/feedback, thinking blocks with alternatives weighed, the decision to accept or revise | Exploration breadcrumbs (which files and patterns informed the design), reasoning chain from evidence to conclusion, draft reasoning before the final plan crystallized |
 
-Future enhancement: extract from subagent transcripts for execution-phase context.
+Neither transcript alone provides the full picture. The main transcript without the Plan subagent transcript shows the reviewer that a plan was made and whether the user pushed back, but not how the agent arrived at it. The plan appears as a finished artifact with no visible reasoning trail. The Plan subagent transcript without the main transcript shows the exploration and reasoning process but loses the user interaction layer: what the user originally asked for, whether they rejected the first plan, and what feedback changed the direction.
+
+The plugin's highest-value output (the "Tradeoffs" and "Approach" sections of the PR description) requires both layers. The main transcript supplies the negotiation (user rejected plan A because X, agent revised to plan B). The Plan subagent transcript supplies the reasoning (agent read files Y and Z, found pattern W, concluded approach B).
+
+**v0 scope: main transcript + Plan subagent transcripts.** Other subagent types (Explore, code-writing, meta agents) contain implementation detail and remain out of scope. The extraction script parses the main transcript for `Task` tool calls with `subagent_type: "Plan"`, extracts the `agentId` from `queue-operation` entries, and reads the corresponding Plan subagent transcript from `<session-dir>/subagents/agent-<agentId>.jsonl`. Plan agents do not produce `thinking` blocks, so that entry type is absent from Plan subagent transcripts.
+
+##### Plan subagent transcript entries
+
+| Entry Type | Key Fields | What we extract |
+|---|---|---|
+| `assistant` (text) | `message.content[].text` | Step-by-step reasoning: analysis of explored code, intermediate conclusions, plan narrative |
+| `assistant` (tool_use) | `message.content[].name`, `.input` | Exploration calls (Read, Grep, Glob, Bash) showing what the Plan agent examined |
+| `assistant` (tool_result) | `message.content[].content` | Results that informed the Plan agent's decisions and conclusions |
+
+Plan agents do not produce `thinking` blocks, so that type is intentionally absent.
 
 ### Processing pipeline
 
@@ -69,7 +89,7 @@ The plugin operates in two phases. Extraction and synthesis are separated for th
 
 **Phase 1: Extraction** (on-demand via `/claude-clode:analyze-traces`):
 
-A Python script reads the transcript line-by-line and extracts structured "signals":
+A Python script reads the main session transcript and any Plan subagent transcripts line-by-line and extracts structured "signals":
 
 | Signal | Source | Why it matters |
 |---|---|---|
@@ -79,12 +99,14 @@ A Python script reads the transcript line-by-line and extracts structured "signa
 | User feedback | `user` entries between plan writes | What the developer pushed back on and why |
 | Thinking decisions | `thinking` blocks containing alternatives/tradeoffs | The agent's internal deliberation on approach |
 | Exploration context | `Read`/`Grep`/`Glob` tool calls before first code write | What the agent researched before deciding |
+| Plan agent reasoning | Plan subagent `assistant` text responses | Step-by-step analysis and intermediate conclusions the Plan agent produced while forming the plan |
+| Plan agent exploration | Plan subagent tool calls (`Read`, `Grep`, `Glob`, `Bash`) | Files and patterns the Plan agent examined, linking plan conclusions to specific codebase evidence |
 
 The highest-value signal is **plan rejections**. When a user rejects the agent's proposed plan and gives feedback, that exchange directly encodes a tradeoff that was explicitly negotiated. Both the original plan and the revision are captured.
 
 Signals are written to an intermediate JSONL file (`.claude-clode/<session>.signals.jsonl`) with a typed schema designed for extensibility: future signal types can be added without changing existing processing.
 
-Extraction is a Python script reading JSONL line-by-line. No LLM, no context window concern. O(n) over the transcript. A typical plan-mode session produces 50K–200K+ tokens of raw transcript (thinking blocks are the bulk). Extraction reduces this to a signals file ~10–20x smaller.
+Extraction is a Python script reading JSONL line-by-line. No LLM, no context window concern. O(n) over each transcript. The script first scans the main transcript for `Task` tool calls with `subagent_type: "Plan"`, collects `agentId` values from corresponding `queue-operation` entries, and locates Plan subagent transcripts at `<session-dir>/subagents/agent-<agentId>.jsonl`. The script then extracts signals from both the main transcript and each discovered Plan subagent transcript. A typical plan-mode session produces 50K–200K+ tokens of raw transcript (thinking blocks are the bulk). Extraction reduces this to a signals file ~10–20x smaller.
 
 **Phase 2: Synthesis** (on-demand via `/claude-clode:analyze-traces` command):
 
@@ -160,7 +182,7 @@ The index lets the developer scan their sessions and choose which ones to feed i
 ## Future directions
 
 - **Inline PR comments**: Map reasoning to specific diff locations so context appears exactly where the reviewer needs it.
-- **Execution-phase signals**: Capture decisions made during implementation (test failures, backtracking, error recovery), not just planning. Extract from subagent transcripts for implementation detail.
+- **Execution-phase signals**: Capture decisions made during implementation (test failures, backtracking, error recovery), not just planning. Extract from non-Plan subagent transcripts (code-writing agents, exploration agents) for implementation detail.
 - **Confidence scoring**: Infer which decisions the agent was uncertain about (many iterations, hedging language) to guide reviewer attention.
 - **PR splitting recommendations**: Detect when a PR contains multiple logical concerns and suggest splitting.
 
@@ -173,3 +195,4 @@ The index lets the developer scan their sessions and choose which ones to feed i
 | Very long session (>500K tokens) | Partially | Extraction runs O(n) regardless of length. The resulting signals may exceed the 100K token threshold, triggering a warning. The developer selects fewer sessions or narrows scope. |
 | Multiple sessions with contradictory decisions | Yes | Synthesis narrates the full reasoning arc, biased toward the final session's state as authoritative. The reviewer sees how the approach evolved. |
 | Session contains sensitive data | No | The plugin reads transcripts as-is with no filtering or redaction. Ensuring transcripts do not contain sensitive data is the developer's responsibility. |
+| Plan subagent transcript missing | Partially | The main transcript still contains the final plan as a `tool_result`. Extraction logs a warning and proceeds with main-transcript-only signals. The PR description loses intermediate reasoning but retains the final plan. |
