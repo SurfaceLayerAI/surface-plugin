@@ -10,9 +10,33 @@ When a developer opens a large pull request (>400 LOC), the reviewer has no cont
 
 ## Solution
 
-Claude Code records full session transcripts including the agent's chain-of-thought reasoning (thinking blocks), tool calls, and user interactions. When a developer finishes their implementation, they select relevant sessions from a Haiku-summarized index and run `/analyze-traces`. The plugin reads the session transcripts, extracts key decisions and tradeoffs, and produces a structured PR description the reviewer can immediately act on.
+Claude Code records full session transcripts including the agent's chain-of-thought reasoning (thinking blocks), tool calls, and user interactions. When a developer finishes their implementation, they run `/claude-clode:sessions` to browse a Haiku-summarized index of recent sessions, select the relevant ones, and run `/claude-clode:analyze-traces` with those session IDs. The plugin reads the session transcripts, extracts key decisions and tradeoffs, and produces a structured PR description.
 
-The reviewer gets the equivalent of a walkthrough — what changed and why, tradeoffs made, and where to focus — without the meeting.
+The reviewer gets the equivalent of a walkthrough: what changed and why, tradeoffs made, and where to focus. No meeting needed.
+
+## Plugin structure and distribution
+
+claude-clode ships as a Claude Code plugin directory:
+
+```
+claude-clode/
+├── .claude-plugin/
+│   └── plugin.json
+├── skills/
+│   ├── analyze-traces/
+│   │   └── SKILL.md
+│   └── sessions/
+│       └── SKILL.md
+├── hooks/
+│   └── hooks.json
+└── scripts/
+    ├── extract_signals.py
+    └── index_session.py
+```
+
+`plugin.json` declares the plugin name, version, description, and registered hooks. The `skills/` directory contains command definitions: each subdirectory maps to a `/claude-clode:<command>` namespace. The `hooks/` directory registers lifecycle hooks (e.g., `SessionEnd` for indexing). The `scripts/` directory holds standalone Python scripts invoked by hooks and commands.
+
+Installation: run `/plugin install <path-or-url>` from Claude Code, or launch Claude Code with `claude --plugin-dir ./claude-clode`. Both methods register the plugin for the current project. Command namespacing (`/claude-clode:<command>`) prevents collisions with other plugins or built-in commands.
 
 ## How it works
 
@@ -31,7 +55,7 @@ Claude Code persists session transcripts to `~/.claude/projects/<project>/<sessi
 
 Claude Code subagents (spawned via the `Task` tool) produce separate transcripts. The `SubagentStop` hook provides `agent_transcript_path`.
 
-**v0: main session transcript only.** The main transcript captures the orchestrating agent's high-level reasoning — why it delegated, what it expected, and results returned. Design decisions and tradeoffs live here. Subagent transcripts contain implementation detail, not strategic reasoning.
+**v0: main session transcript only.** The main transcript captures the orchestrating agent's high-level reasoning: why it delegated, what it expected, and results returned. Design decisions and tradeoffs live here. Subagent transcripts contain implementation detail, not strategic reasoning.
 
 Future enhancement: extract from subagent transcripts for execution-phase context.
 
@@ -43,7 +67,7 @@ The plugin operates in two phases. Extraction and synthesis are separated for th
 - **Debuggability**: The intermediate signals file is human-readable. If the PR description is wrong, inspect signals to diagnose whether extraction missed something or synthesis misinterpreted it.
 - **Replayability**: Re-run synthesis with different prompts or models without re-extracting.
 
-**Phase 1 — Extraction** (on-demand via `/analyze-traces`):
+**Phase 1: Extraction** (on-demand via `/claude-clode:analyze-traces`):
 
 A Python script reads the transcript line-by-line and extracts structured "signals":
 
@@ -58,11 +82,11 @@ A Python script reads the transcript line-by-line and extracts structured "signa
 
 The highest-value signal is **plan rejections**. When a user rejects the agent's proposed plan and gives feedback, that exchange directly encodes a tradeoff that was explicitly negotiated. Both the original plan and the revision are captured.
 
-Signals are written to an intermediate JSONL file (`.claude-clode/<session>.signals.jsonl`) with a typed schema designed for extensibility — future signal types can be added without changing existing processing.
+Signals are written to an intermediate JSONL file (`.claude-clode/<session>.signals.jsonl`) with a typed schema designed for extensibility: future signal types can be added without changing existing processing.
 
 Extraction is a Python script reading JSONL line-by-line. No LLM, no context window concern. O(n) over the transcript. A typical plan-mode session produces 50K–200K+ tokens of raw transcript (thinking blocks are the bulk). Extraction reduces this to a signals file ~10–20x smaller.
 
-**Phase 2 — Synthesis** (on-demand via `/analyze-traces` command):
+**Phase 2: Synthesis** (on-demand via `/claude-clode:analyze-traces` command):
 
 A Claude Code command reads the extracted signals and produces a four-section PR description:
 
@@ -73,7 +97,11 @@ A Claude Code command reads the extracted signals and produces a four-section PR
 | **Tradeoffs** | Alternatives considered and rejected, especially where user feedback changed direction |
 | **Review Focus** | Areas of uncertainty or complexity that deserve close attention |
 
-Before synthesis, `/analyze-traces` estimates the combined token count of all selected signals files. If the estimate exceeds a threshold (~30K tokens), it warns the developer and recommends selecting fewer sessions or a narrower scope. Automatic chunking/prioritization is out of scope for v0.
+Before synthesis, `/claude-clode:analyze-traces` estimates the combined token count of all selected signals files. If the estimate exceeds 100K tokens (roughly 50% of the context window, the general threshold for performance degradation), it warns the developer and recommends selecting fewer sessions or a narrower scope. Automatic chunking/prioritization is out of scope for v0.
+
+#### Multi-session synthesis
+
+When `/claude-clode:analyze-traces` receives multiple session IDs, synthesis narrates the full reasoning arc across sessions. The output is biased toward the final session's state as authoritative, since later sessions reflect the most current decisions. The reviewer sees how the approach evolved: initial direction, mid-course corrections, and the rationale behind the final state.
 
 ### Session indexing
 
@@ -83,7 +111,7 @@ When a Claude Code session ends, a `SessionEnd` hook runs a lightweight indexing
 {"session_id": "...", "timestamp": "...", "summary": "...", "plan_mode": true, "plan_paths": ["plans/auth-redesign.md"]}
 ```
 
-This index exists so the developer can scan their sessions and choose which ones to feed into `/analyze-traces`. A session ID and timestamp alone aren't enough — the developer needs to understand *what happened*. Haiku turns structural metadata into a human-scannable summary at negligible cost (~$0.25/MTok input; a few thousand tokens of extracted snippets costs fractions of a cent per session).
+The index lets the developer scan their sessions and choose which ones to feed into `/claude-clode:analyze-traces`. A session ID and timestamp alone are not enough: the developer needs to understand *what happened*. Haiku turns structural metadata into a human-scannable summary at negligible cost (~$0.25/MTok input; a few thousand tokens of extracted snippets costs fractions of a cent per session).
 
 ### Hooks and triggers
 
@@ -93,13 +121,14 @@ This index exists so the developer can scan their sessions and choose which ones
 
 | Command | Trigger | Purpose |
 |---|---|---|
-| `/analyze-traces <session-id> [session-id...]` | Developer runs manually with selected session IDs | Runs extraction (Phase 1) then synthesis (Phase 2) on chosen sessions, outputs PR description |
+| `/claude-clode:sessions` | Developer runs manually | Displays the session index (summaries and IDs) in the TUI. The developer reads summaries, copies relevant session IDs, and runs `/claude-clode:analyze-traces`. |
+| `/claude-clode:analyze-traces <session-id> [session-id...]` | Developer runs manually with selected session IDs | Runs extraction (Phase 1) then synthesis (Phase 2) on chosen sessions, outputs PR description |
 
-**Why SessionEnd and not other hooks:** The transcript is the data source — Claude Code writes it throughout the session. We don't need hooks to *collect* data. SessionEnd is used for session indexing only — a Haiku-summarized entry that helps the developer find and select relevant sessions. No other hook point is needed: `PreToolUse`/`PostToolUse` fire per tool call (hundreds of times per session), and the transcript already records all that data. Duplicating it via hooks adds complexity with no benefit.
+**Why SessionEnd and not other hooks:** The transcript is the data source. Claude Code writes it throughout the session. The plugin does not need hooks to *collect* data. SessionEnd handles session indexing only: a Haiku-summarized entry that helps the developer find and select relevant sessions. No other hook point is needed. `PreToolUse`/`PostToolUse` fire per tool call (hundreds of times per session), and the transcript already records all that data. Duplicating it via hooks adds complexity with no benefit.
 
-**Why SessionEnd and not automatic extraction:** Development is non-linear. A developer may work across many sessions, revisit earlier work, or abandon threads. Running full extraction on every SessionEnd wastes work on sessions that may never be relevant to the final PR. The developer knows which sessions matter — they should select them explicitly via `/analyze-traces`.
+**Why SessionEnd and not automatic extraction:** Development is non-linear. A developer may work across many sessions, revisit earlier work, or abandon threads. Running full extraction on every SessionEnd wastes work on sessions that may never be relevant to the final PR. The developer knows which sessions matter and selects them explicitly via `/claude-clode:analyze-traces`.
 
-**SessionEnd firing conditions:** The hook receives `session_id` and `transcript_path`. Known reasons for firing: `clear`, `logout`, `prompt_input_exit`, `bypass_permissions_disabled`, `other`. If SessionEnd doesn't fire (e.g., process killed), the session transcript still exists on disk. `/analyze-traces` can process any session by ID regardless of whether SessionEnd indexed it — the index is a convenience, not a requirement.
+**SessionEnd firing conditions:** The hook receives `session_id` and `transcript_path`. Known reasons for firing: `clear`, `logout`, `prompt_input_exit`, `bypass_permissions_disabled`, `other`. If SessionEnd does not fire (e.g., process killed), the session transcript still exists on disk. `/claude-clode:analyze-traces` can process any session by ID regardless of whether SessionEnd indexed it. The index is a convenience, not a requirement.
 
 ## Scope (v0)
 
@@ -107,33 +136,40 @@ This index exists so the developer can scan their sessions and choose which ones
 - Plan-mode sessions (where the agent explicitly deliberates on approach before executing)
 - PR description as output (copy-pasteable into GitHub/GitLab)
 - Session indexing on session end (lightweight Haiku summary for discoverability)
-- On-demand extraction and synthesis via `/analyze-traces` with explicit session selection
-- Multi-session support — `/analyze-traces` accepts multiple session IDs for PRs spanning several sessions
+- On-demand extraction and synthesis via `/claude-clode:analyze-traces` with explicit session selection
+- Multi-session support: `/claude-clode:analyze-traces` accepts multiple session IDs for PRs spanning several sessions
 
 **Out of scope:**
-- Non-plan-mode sessions — if the developer isn't using plan mode, the change is likely not complex enough to need this context
-- Inline PR comments on specific code lines — v0 produces a top-level summary; line-level annotations are a future enhancement
-- Execution-phase code capture via `PostToolUse` hook on `Edit`/`Write` — the transcript already records every tool call including edits, so a separate hook duplicates data. v0 focuses on *reasoning* (the "why"), not code (the "what"). The reviewer sees code in the diff; they lack the context for why it looks that way.
-- Automatic context chunking — if combined signals exceed the context threshold, the developer selects fewer sessions rather than the tool auto-splitting
+- Non-plan-mode sessions. Plan-mode sessions produce structured reasoning signals (plans, plan rejections, deliberation) that the extraction pipeline reliably parses. Non-plan-mode sessions lack these artifacts. The problem exists outside plan mode; the extraction pipeline does not handle unstructured sessions yet.
+- Inline PR comments on specific code lines. v0 produces a top-level summary; line-level annotations are a future enhancement.
+- Execution-phase code capture via `PostToolUse` hook on `Edit`/`Write`. The transcript already records every tool call including edits, so a separate hook duplicates data. v0 focuses on *reasoning* (the "why"), not code (the "what"). The reviewer sees code in the diff; they lack the context for why it looks that way.
+- Automatic context chunking. If combined signals exceed the context threshold, the developer selects fewer sessions rather than the tool auto-splitting.
+- Reviewer feedback loops. The current architecture provides no mechanism to record or act on reviewer feedback. A future version may close the loop by feeding review comments back into the plugin.
 
 ## User experience
 
-1. Developer uses Claude Code with plan mode to implement a feature
+1. Developer uses Claude Code with plan mode to implement a feature.
 2. Session ends. The plugin indexes the session (Haiku summary) in the background.
-3. Developer reviews the session index to identify relevant sessions
-4. Developer runs `/analyze-traces <session-id> [session-id...]` with selected sessions
-5. Plugin extracts signals, estimates context size (warns if too large), runs synthesis, and outputs a structured PR description
-6. Developer pastes the PR description into their pull request
-7. Reviewer reads the PR description and starts reviewing immediately — no meeting needed
+3. Developer runs `/claude-clode:sessions` to browse the session index.
+4. Developer copies relevant session IDs and runs `/claude-clode:analyze-traces <session-id> [session-id...]`.
+5. Plugin extracts signals, estimates context size (warns if >100K tokens), runs synthesis, and outputs a structured PR description.
+6. Plugin displays the generated PR description for developer review.
+7. On confirmation, the plugin creates the PR via `gh pr create --body`.
+8. Reviewer reads the PR description and starts reviewing. No meeting needed.
 
 ## Future directions
 
-- **Inline PR comments**: Map reasoning to specific diff locations so context appears exactly where the reviewer needs it
-- **Execution-phase signals**: Capture decisions made during implementation (test failures, backtracking, error recovery) — not just planning. This includes extracting from subagent transcripts for implementation detail.
-- **Confidence scoring**: Infer which decisions the agent was uncertain about (many iterations, hedging language) to guide reviewer attention
-- **PR splitting recommendations**: Detect when a PR contains multiple logical concerns and suggest splitting
+- **Inline PR comments**: Map reasoning to specific diff locations so context appears exactly where the reviewer needs it.
+- **Execution-phase signals**: Capture decisions made during implementation (test failures, backtracking, error recovery), not just planning. Extract from subagent transcripts for implementation detail.
+- **Confidence scoring**: Infer which decisions the agent was uncertain about (many iterations, hedging language) to guide reviewer attention.
+- **PR splitting recommendations**: Detect when a PR contains multiple logical concerns and suggest splitting.
 
-## Edge Cases
+## Edge cases
 
-| Edge Case | Do We Handle? | Reasoning |
+| Edge Case | Handled? | Reasoning |
 |---|---|---|
+| Transcript missing (process killed) | Yes | `/claude-clode:analyze-traces` reads from disk by session ID. If SessionEnd did not fire, the index lacks the entry, but the transcript file persists. The developer provides the session ID directly. |
+| Session has no plan-mode activity | No | Extraction produces empty signals. Synthesis warns the developer that no structured reasoning was found. |
+| Very long session (>500K tokens) | Partially | Extraction runs O(n) regardless of length. The resulting signals may exceed the 100K token threshold, triggering a warning. The developer selects fewer sessions or narrows scope. |
+| Multiple sessions with contradictory decisions | Yes | Synthesis narrates the full reasoning arc, biased toward the final session's state as authoritative. The reviewer sees how the approach evolved. |
+| Session contains sensitive data | No | The plugin reads transcripts as-is with no filtering or redaction. Ensuring transcripts do not contain sensitive data is the developer's responsibility. |
