@@ -34,6 +34,11 @@ def _hook_main():
         print("{}")
         sys.exit(0)
 
+    # Filter non-terminal events before doing any expensive work
+    if not _should_index(hook_input):
+        print("{}")
+        sys.exit(0)
+
     session_id = hook_input.get("session_id", "")
     transcript_path = hook_input.get("transcript_path", "")
     cwd = hook_input.get("cwd", "")
@@ -198,6 +203,50 @@ def _list_sessions_with_status(project_dir, surface_dir):
     else:
         from lib.pager import _print_plain
         _print_plain(rows)
+
+
+# --- SessionEnd reason filtering ---
+
+_SKIP_REASONS = frozenset(["clear", "prompt_input_exit", "bypass_permissions_disabled"])
+_INDEX_REASONS = frozenset(["logout"])
+
+
+def _should_index(hook_input):
+    # type: (dict) -> bool
+    """Decide whether this SessionEnd event warrants indexing.
+
+    Returns False for non-terminal events (clear, permission changes).
+    Returns True for definitive termination (logout).
+    For ambiguous reasons ('other', missing), checks transcript for substance.
+    """
+    reason = hook_input.get("reason", "")
+
+    if reason in _SKIP_REASONS:
+        return False
+
+    if reason in _INDEX_REASONS:
+        return True
+
+    # Ambiguous reason: check transcript for substance
+    transcript_path = hook_input.get("transcript_path", "")
+    if not transcript_path or not Path(transcript_path).exists():
+        return False
+
+    return _has_substantive_content(Path(transcript_path))
+
+
+def _has_substantive_content(transcript_path):
+    # type: (Path) -> bool
+    """True if the transcript contains at least one non-noise user message."""
+    for entry in iter_entries(transcript_path):
+        if entry.get("type") != "user":
+            continue
+        if is_system_entry(entry):
+            continue
+        text = extract_user_text(entry).strip()
+        if text and not _is_noise_command(text):
+            return True
+    return False
 
 
 _TOTAL_USER_BUDGET = 4000

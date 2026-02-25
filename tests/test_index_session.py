@@ -514,3 +514,99 @@ class TestCLIMode:
         assert result.returncode == 0
         for i in range(15):
             assert "sess-{:03d}".format(i) in result.stdout
+
+
+class TestSessionEndFiltering:
+    """Tests for _should_index reason-based filtering."""
+
+    def test_skip_reason_clear(self):
+        from index_session import _should_index
+        assert _should_index({"reason": "clear"}) is False
+
+    def test_skip_reason_prompt_input_exit(self):
+        from index_session import _should_index
+        assert _should_index({"reason": "prompt_input_exit"}) is False
+
+    def test_skip_reason_bypass_permissions_disabled(self):
+        from index_session import _should_index
+        assert _should_index({"reason": "bypass_permissions_disabled"}) is False
+
+    def test_index_reason_logout(self):
+        from index_session import _should_index
+        assert _should_index({"reason": "logout"}) is True
+
+    def test_reason_other_with_substance(self, tmp_path):
+        from index_session import _should_index
+        transcript = tmp_path / "session.jsonl"
+        _make_transcript(transcript, [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "Build the auth system"},
+            },
+        ])
+        assert _should_index({"reason": "other", "transcript_path": str(transcript)}) is True
+
+    def test_reason_other_noise_only(self, tmp_path):
+        from index_session import _should_index
+        transcript = tmp_path / "session.jsonl"
+        _make_transcript(transcript, [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "/clear"},
+            },
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:01:00Z",
+                "message": {"role": "user", "content": "/compact"},
+            },
+        ])
+        assert _should_index({"reason": "other", "transcript_path": str(transcript)}) is False
+
+    def test_reason_other_empty_transcript(self, tmp_path):
+        from index_session import _should_index
+        transcript = tmp_path / "session.jsonl"
+        _make_transcript(transcript, [])
+        assert _should_index({"reason": "other", "transcript_path": str(transcript)}) is False
+
+    def test_missing_reason_with_substance(self, tmp_path):
+        from index_session import _should_index
+        transcript = tmp_path / "session.jsonl"
+        _make_transcript(transcript, [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "Add tests"},
+            },
+        ])
+        assert _should_index({"transcript_path": str(transcript)}) is True
+
+    def test_nonexistent_transcript_skipped(self):
+        from index_session import _should_index
+        assert _should_index({"reason": "other", "transcript_path": "/nonexistent/path.jsonl"}) is False
+
+    def test_subprocess_skips_clear(self, tmp_path):
+        """Hook subprocess exits cleanly without indexing on reason='clear'."""
+        transcript_path = tmp_path / "session.jsonl"
+        _make_transcript(transcript_path, _SAMPLE_ENTRIES)
+
+        hook_input = json.dumps({
+            "session_id": "test-clear",
+            "transcript_path": str(transcript_path),
+            "cwd": str(tmp_path),
+            "reason": "clear",
+        })
+
+        env = os.environ.copy()
+        env.pop("SURFACE_INDEXING", None)
+        env["CLAUDE_PLUGIN_ROOT"] = PLUGIN_ROOT
+
+        result = sp.run(
+            [sys.executable, SCRIPT],
+            input=hook_input,
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert result.stdout.strip() == "{}"
+        assert not (tmp_path / ".surface" / "session-index.jsonl").exists()

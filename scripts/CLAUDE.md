@@ -6,7 +6,7 @@ Python scripts for signal extraction and session indexing. All stdlib-only, no p
 
 - `extract_signals.py` — CLI entry point for signal extraction. Reads a session transcript, discovers Plan subagents, extracts signals, writes to `.surface/<session_id>.signals.jsonl`.
 - `index_session.py` — Session indexing. Two modes:
-  - **Hook mode** (no CLI args): SessionEnd hook entry point. Reads `{session_id, transcript_path, cwd}` from stdin.
+  - **Hook mode** (no CLI args): SessionEnd hook entry point. Reads `{session_id, transcript_path, cwd, reason}` from stdin. Filters non-terminal events (clear, permission changes) before indexing; ambiguous events checked for transcript substance.
   - **CLI mode** (with args): Retroactive indexing. Supports `--session-id <id>`, `--backfill`, `--list`, `--force`, `--project-dir`.
 - `lib/` — Shared modules:
   - `transcript_reader.py` — JSONL streaming parser, content block extraction, system entry detection
