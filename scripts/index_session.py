@@ -185,8 +185,8 @@ def _list_sessions_with_status(project_dir, surface_dir):
     existing = load_index(surface_dir)
     index_map = {e.get("session_id"): e for e in existing}
 
-    print("{:<12} {:<24} {}".format("STATUS", "SESSION ID", "SUMMARY"))
-    print("-" * 72)
+    print("{:<12} {:<38} {}".format("STATUS", "SESSION ID", "SUMMARY"))
+    print("-" * 90)
 
     for session in sessions:
         sid = session["session_id"]
@@ -204,7 +204,7 @@ def _list_sessions_with_status(project_dir, surface_dir):
             except Exception:
                 summary = "(unable to read transcript)"
 
-        print("{:<12} {:<24} {}".format(status, sid[:22], summary))
+        print("{:<12} {:<38} {}".format(status, sid, summary))
 
 
 def _extract_metadata(transcript_path, session_id):
