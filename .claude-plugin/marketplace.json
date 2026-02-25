@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "surface",
+  "description": "Plugins for reducing the surface area of code review",
+  "owner": {
+    "name": "stremblay"
+  },
+  "plugins": [
+    {
+      "name": "surface",
+      "description": "Extracts reasoning signals from Claude Code session transcripts and synthesizes structured PR descriptions for reviewers",
+      "version": "0.1.0",
+      "author": {
+        "name": "stremblay"
+      },
+      "source": "./",
+      "category": "development"
+    }
+  ]
+}
