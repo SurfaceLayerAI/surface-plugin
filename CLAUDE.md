@@ -25,6 +25,7 @@ Each directory with a `CLAUDE.md` has one to help agents navigate the codebase. 
 - `agents/indexer.md` — Summarizer prompt template for session indexing
 - `scripts/` — Python extraction and indexing pipeline (see `scripts/CLAUDE.md`)
 - `.surface/` — Runtime output directory (gitignored). Contains signals files and session index.
+- `tests/` — Pytest suite for scripts (see `tests/CLAUDE.md`)
 
 ## Constraints
 
