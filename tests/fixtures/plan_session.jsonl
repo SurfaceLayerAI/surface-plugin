@@ -1,0 +1,4 @@
+{"type": "user", "timestamp": "2026-02-24T10:00:00Z", "message": {"role": "user", "content": [{"type": "text", "text": "Please review the changes and create a plan."}]}}
+{"type": "assistant", "timestamp": "2026-02-24T10:00:05Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_plan_001", "name": "Task", "input": {"subagent_type": "Plan", "description": "Create a review plan for the changes."}}]}}
+{"type": "progress", "timestamp": "2026-02-24T10:00:06Z", "parentToolUseID": "toolu_plan_001", "data": {"agentId": "test_agent_abc123"}}
+{"type": "assistant", "timestamp": "2026-02-24T10:00:30Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Here is the plan I created based on the review."}]}}

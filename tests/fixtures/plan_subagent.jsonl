@@ -1,0 +1,4 @@
+{"type": "assistant", "timestamp": "2026-02-24T10:00:10Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Analyzing the authentication patterns in the codebase..."}]}}
+{"type": "assistant", "timestamp": "2026-02-24T10:00:20Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_sa_read_001", "name": "Read", "input": {"file_path": "src/auth/middleware.ts"}}]}}
+{"type": "assistant", "timestamp": "2026-02-24T10:00:30Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_sa_grep_001", "name": "Grep", "input": {"pattern": "authenticate", "path": "src/"}}]}}
+{"type": "assistant", "timestamp": "2026-02-24T10:00:40Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Based on the analysis, the codebase uses a middleware chain pattern..."}]}}

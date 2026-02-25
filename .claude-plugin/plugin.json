@@ -1,0 +1,4 @@
+{
+  "name": "surface",
+  "description": "Extracts reasoning signals from Claude Code session transcripts and synthesizes structured PR descriptions for reviewers"
+}
