@@ -2,23 +2,21 @@
 import shutil
 import textwrap
 
-# Column widths: STATUS (12) + SESSION ID (38) = 50 prefix
-_STATUS_WIDTH = 12
 _SESSION_ID_WIDTH = 38
-_PREFIX_WIDTH = _STATUS_WIDTH + _SESSION_ID_WIDTH
+_PREFIX_WIDTH = _SESSION_ID_WIDTH
 
-_HEADER = "{:<{sw}}{:<{iw}}{}".format(
-    "STATUS", "SESSION ID", "SUMMARY",
-    sw=_STATUS_WIDTH, iw=_SESSION_ID_WIDTH,
+_HEADER = "{:<{iw}}{}".format(
+    "SESSION ID", "SUMMARY",
+    iw=_SESSION_ID_WIDTH,
 )
 
 
-def format_row(status, session_id, summary, summary_width):
-    # type: (str, str, str, int) -> list
+def format_row(session_id, summary, summary_width):
+    # type: (str, str, int) -> list
     """Format a single row into display lines with text wrapping.
 
-    Returns a list of strings. The first line contains all three columns;
-    continuation lines are indented to the summary column (column 50).
+    Returns a list of strings. The first line contains both columns;
+    continuation lines are indented to the summary column.
     """
     if summary_width < 10:
         summary_width = 10
@@ -26,9 +24,9 @@ def format_row(status, session_id, summary, summary_width):
     wrapped = textwrap.wrap(summary, width=summary_width) if summary else []
 
     first_summary = wrapped[0] if wrapped else ""
-    first_line = "{:<{sw}}{:<{iw}}{}".format(
-        status, session_id, first_summary,
-        sw=_STATUS_WIDTH, iw=_SESSION_ID_WIDTH,
+    first_line = "{:<{iw}}{}".format(
+        session_id, first_summary,
+        iw=_SESSION_ID_WIDTH,
     )
     lines = [first_line]
 
@@ -65,7 +63,7 @@ def _print_plain(rows):
 
     for row in rows:
         lines = format_row(
-            row["status"], row["session_id"], row["summary"], summary_width
+            row["session_id"], row["summary"], summary_width
         )
         for line in lines:
             print(line)
@@ -90,7 +88,7 @@ def _curses_main(stdscr, rows):
         for row in rows:
             row_starts.append(len(all_lines))
             lines = format_row(
-                row["status"], row["session_id"], row["summary"], summary_width
+                row["session_id"], row["summary"], summary_width
             )
             all_lines.extend(lines)
 

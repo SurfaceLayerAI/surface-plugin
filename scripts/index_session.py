@@ -189,19 +189,8 @@ def _list_sessions_with_status(project_dir, surface_dir):
     for session in sessions:
         sid = session["session_id"]
         indexed_entry = index_map.get(sid)
-
-        if indexed_entry:
-            status = "[indexed]"
-            summary = indexed_entry.get("summary", "")
-        else:
-            status = "[unindexed]"
-            try:
-                metadata = _extract_metadata(session["path"], sid)
-                summary = metadata.get("initial_request", "")
-            except Exception:
-                summary = "(unable to read transcript)"
-
-        rows.append({"status": status, "session_id": sid, "summary": summary})
+        summary = indexed_entry.get("summary", "Not Indexed") if indexed_entry else "Not Indexed"
+        rows.append({"session_id": sid, "summary": summary})
 
     if sys.stdout.isatty():
         from lib.pager import run_pager

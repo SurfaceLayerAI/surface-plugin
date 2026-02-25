@@ -359,7 +359,7 @@ class TestCLIMode:
         assert "--project-dir" in result.stdout
 
     def test_list_sessions(self, tmp_path):
-        """--list shows sessions with [indexed]/[unindexed] markers."""
+        """--list shows sessions with summary or 'Not Indexed'."""
         project_dir = str(tmp_path / "myproject")
         _make_fake_session_dir(tmp_path, project_dir, "sess-aaa", _SAMPLE_ENTRIES)
         env = _cli_env(tmp_path)
@@ -369,9 +369,8 @@ class TestCLIMode:
             capture_output=True, text=True, env=env,
         )
         assert result.returncode == 0
-        assert "STATUS" in result.stdout
-        assert "[unindexed]" in result.stdout
         assert "sess-aaa" in result.stdout
+        assert "Not Indexed" in result.stdout
 
     def test_index_single_session(self, tmp_path):
         """--session-id indexes a single session and writes to .surface/."""
