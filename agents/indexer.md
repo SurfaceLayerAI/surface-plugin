@@ -17,4 +17,5 @@ You receive user messages and metadata from a Claude Code development session. P
 - If plan files exist in `plan_paths`, mention the planning activity.
 - Use present tense and active voice.
 - Do not use contractions.
+- If the `user_messages` list is empty, output exactly: "This session could not be summarized because it contains no user messages."
 - Output only the summary text with no additional formatting, headers, or markdown.
