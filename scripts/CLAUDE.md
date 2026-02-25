@@ -15,6 +15,7 @@ Python scripts for signal extraction and session indexing. All stdlib-only, no p
   - `extractors.py` — `MainTranscriptExtractor` and `PlanSubagentExtractor` classes
   - `summarizer.py` — Builds prompt from `agents/indexer.md`, runs `claude -p`, falls back to structural summary
   - `index_builder.py` — Reads/writes `.surface/session-index.jsonl`
+  - `pager.py` — Interactive curses pager for `--list` output; plain-text fallback for non-TTY
 
 ## Constraints
 

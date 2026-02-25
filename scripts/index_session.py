@@ -9,7 +9,7 @@ from pathlib import Path
 PLUGIN_ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT", str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, os.path.join(PLUGIN_ROOT, "scripts"))
 
-from lib.transcript_reader import iter_entries, get_content_blocks, is_system_entry
+from lib.transcript_reader import iter_entries, get_content_blocks, is_system_entry, extract_user_text
 from lib.summarizer import summarize_session
 from lib.session_discovery import get_session_transcript_path, list_sessions
 from lib.index_builder import append_index_entry, load_index, replace_index_entry
@@ -185,36 +185,55 @@ def _list_sessions_with_status(project_dir, surface_dir):
     existing = load_index(surface_dir)
     index_map = {e.get("session_id"): e for e in existing}
 
-    print("{:<12} {:<38} {}".format("STATUS", "SESSION ID", "SUMMARY"))
-    print("-" * 90)
-
+    rows = []
     for session in sessions:
         sid = session["session_id"]
         indexed_entry = index_map.get(sid)
 
         if indexed_entry:
             status = "[indexed]"
-            summary = indexed_entry.get("summary", "")[:60]
+            summary = indexed_entry.get("summary", "")
         else:
             status = "[unindexed]"
-            # Quick peek at initial request from transcript
             try:
                 metadata = _extract_metadata(session["path"], sid)
-                summary = metadata.get("initial_request", "")[:60]
+                summary = metadata.get("initial_request", "")
             except Exception:
                 summary = "(unable to read transcript)"
 
-        print("{:<12} {:<38} {}".format(status, sid, summary))
+        rows.append({"status": status, "session_id": sid, "summary": summary})
+
+    if sys.stdout.isatty():
+        from lib.pager import run_pager
+        run_pager(rows)
+    else:
+        from lib.pager import _print_plain
+        _print_plain(rows)
+
+
+_TOTAL_USER_BUDGET = 4000
+_PER_MESSAGE_LIMIT = 800
+_NOISE_COMMANDS = ("/clear", "/compact", "/model", "/cost", "/help", "/exit")
+
+
+def _is_noise_command(text):
+    # type: (str) -> bool
+    """True if text is a slash command with no task content."""
+    stripped = text.strip()
+    for cmd in _NOISE_COMMANDS:
+        if stripped == cmd or stripped.startswith(cmd + " "):
+            return True
+    return False
 
 
 def _extract_metadata(transcript_path, session_id):
     # type: (Path, str) -> dict
     """Extract structural metadata from a transcript."""
-    initial_request = ""
+    user_messages = []
     plan_paths = []
     timestamps = []
     plan_mode = False
-    first_user_seen = False
+    budget_remaining = _TOTAL_USER_BUDGET
 
     for entry in iter_entries(transcript_path):
         ts = entry.get("timestamp", "")
@@ -223,17 +242,18 @@ def _extract_metadata(transcript_path, session_id):
 
         entry_type = entry.get("type", "")
 
-        # Get initial user request
-        if entry_type == "user" and not first_user_seen and not is_system_entry(entry):
-            first_user_seen = True
-            content = entry.get("message", {}).get("content", "")
-            if isinstance(content, list):
-                parts = []
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        parts.append(block.get("text", ""))
-                content = " ".join(parts)
-            initial_request = content[:500]
+        # Collect non-system user messages within budget
+        if entry_type == "user" and not is_system_entry(entry) and budget_remaining > 0:
+            text = extract_user_text(entry).strip()
+            if text and not _is_noise_command(text):
+                truncated = text[:_PER_MESSAGE_LIMIT]
+                if len(truncated) > budget_remaining:
+                    if budget_remaining > 50:
+                        user_messages.append(truncated[:budget_remaining])
+                    budget_remaining = 0
+                else:
+                    user_messages.append(truncated)
+                    budget_remaining -= len(truncated)
 
         # Detect plan writes
         if entry_type == "assistant":
@@ -247,9 +267,12 @@ def _extract_metadata(transcript_path, session_id):
                         if file_path not in plan_paths:
                             plan_paths.append(file_path)
 
+    initial_request = user_messages[0][:500] if user_messages else ""
+
     return {
         "session_id": session_id,
         "initial_request": initial_request,
+        "user_messages": user_messages,
         "plan_paths": plan_paths,
         "plan_mode": plan_mode,
         "timestamp_start": timestamps[0] if timestamps else "",
