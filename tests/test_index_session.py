@@ -3,9 +3,13 @@
 import sys
 import json
 import os
+import subprocess as sp
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+SCRIPT = str(Path(__file__).resolve().parent.parent / "scripts" / "index_session.py")
+PLUGIN_ROOT = str(Path(__file__).resolve().parent.parent)
 
 
 def _make_transcript(path, entries):
@@ -189,3 +193,198 @@ class TestIndexSession:
         assert result.stdout.strip() == "{}"
         # No index file should be created
         assert not (tmp_path / ".surface" / "session-index.jsonl").exists()
+
+
+def _make_fake_session_dir(tmp_path, project_dir, session_id, entries):
+    """Create a fake session transcript in the Claude sessions directory layout.
+
+    Mimics ~/.claude/projects/<slug>/<session_id>.jsonl where HOME = tmp_path/fakehome.
+    """
+    # type: (Path, str, str, list) -> Path
+    slug = project_dir.replace("/", "-")
+    session_dir = tmp_path / "fakehome" / ".claude" / "projects" / slug
+    session_dir.mkdir(parents=True, exist_ok=True)
+    transcript = session_dir / (session_id + ".jsonl")
+    with open(transcript, "w") as f:
+        for entry in entries:
+            f.write(json.dumps(entry) + "\n")
+    return transcript
+
+
+def _cli_env(tmp_path):
+    """Build env dict for CLI subprocess calls."""
+    env = os.environ.copy()
+    env.pop("SURFACE_INDEXING", None)
+    env["CLAUDE_PLUGIN_ROOT"] = PLUGIN_ROOT
+    env["HOME"] = str(tmp_path / "fakehome")
+    env["PATH"] = ""
+    return env
+
+
+_SAMPLE_ENTRIES = [
+    {
+        "type": "user",
+        "timestamp": "2024-06-01T10:00:00Z",
+        "message": {"role": "user", "content": "Add login endpoint"},
+    },
+    {
+        "type": "assistant",
+        "timestamp": "2024-06-01T10:05:00Z",
+        "message": {"role": "assistant", "content": [{"type": "text", "text": "Done."}]},
+    },
+]
+
+
+class TestCLIMode:
+    def test_recursion_guard_does_not_fire_in_cli_mode(self, tmp_path):
+        """SURFACE_INDEXING env var should not cause early exit in CLI mode."""
+        env = os.environ.copy()
+        env["SURFACE_INDEXING"] = "1"
+        env["CLAUDE_PLUGIN_ROOT"] = PLUGIN_ROOT
+        # CLI mode triggers when args are present; --help should work regardless of env
+        result = sp.run(
+            [sys.executable, SCRIPT, "--help"],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "--project-dir" in result.stdout
+
+    def test_list_sessions(self, tmp_path):
+        """--list shows sessions with [indexed]/[unindexed] markers."""
+        project_dir = str(tmp_path / "myproject")
+        _make_fake_session_dir(tmp_path, project_dir, "sess-aaa", _SAMPLE_ENTRIES)
+        env = _cli_env(tmp_path)
+
+        result = sp.run(
+            [sys.executable, SCRIPT, "--list", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "[unindexed]" in result.stdout
+        assert "sess-aaa" in result.stdout
+
+    def test_index_single_session(self, tmp_path):
+        """--session-id indexes a single session and writes to .surface/."""
+        project_dir = str(tmp_path / "myproject")
+        _make_fake_session_dir(tmp_path, project_dir, "sess-bbb", _SAMPLE_ENTRIES)
+        env = _cli_env(tmp_path)
+        surface_dir = Path(project_dir) / ".surface"
+
+        result = sp.run(
+            [sys.executable, SCRIPT, "--session-id", "sess-bbb", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "Indexed:" in result.stdout
+
+        from lib.index_builder import load_index
+        entries = load_index(surface_dir)
+        assert len(entries) == 1
+        assert entries[0]["session_id"] == "sess-bbb"
+
+    def test_skip_already_indexed(self, tmp_path):
+        """Already-indexed sessions are skipped without --force."""
+        project_dir = str(tmp_path / "myproject")
+        _make_fake_session_dir(tmp_path, project_dir, "sess-ccc", _SAMPLE_ENTRIES)
+        env = _cli_env(tmp_path)
+
+        # Index once
+        sp.run(
+            [sys.executable, SCRIPT, "--session-id", "sess-ccc", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+
+        # Try again without --force
+        result = sp.run(
+            [sys.executable, SCRIPT, "--session-id", "sess-ccc", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "already indexed" in result.stdout
+
+        from lib.index_builder import load_index
+        entries = load_index(Path(project_dir) / ".surface")
+        assert len(entries) == 1
+
+    def test_force_reindex(self, tmp_path):
+        """--force re-indexes and replaces existing entry."""
+        project_dir = str(tmp_path / "myproject")
+        _make_fake_session_dir(tmp_path, project_dir, "sess-ddd", _SAMPLE_ENTRIES)
+        env = _cli_env(tmp_path)
+
+        # Index once
+        sp.run(
+            [sys.executable, SCRIPT, "--session-id", "sess-ddd", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        # Force re-index
+        result = sp.run(
+            [sys.executable, SCRIPT, "--session-id", "sess-ddd", "--project-dir", project_dir, "--force"],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "Indexed:" in result.stdout
+
+        from lib.index_builder import load_index
+        entries = load_index(Path(project_dir) / ".surface")
+        # Should still have exactly 1 entry (replaced, not duplicated)
+        assert len(entries) == 1
+
+    def test_missing_transcript_cli(self, tmp_path):
+        """CLI exits with error when transcript does not exist."""
+        project_dir = str(tmp_path / "myproject")
+        # Create the sessions dir but no transcript
+        slug = project_dir.replace("/", "-")
+        (tmp_path / "fakehome" / ".claude" / "projects" / slug).mkdir(parents=True, exist_ok=True)
+        env = _cli_env(tmp_path)
+
+        result = sp.run(
+            [sys.executable, SCRIPT, "--session-id", "nonexistent", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode != 0
+        assert "Error: transcript not found" in result.stderr
+
+    def test_backfill(self, tmp_path):
+        """--backfill indexes all unindexed sessions."""
+        project_dir = str(tmp_path / "myproject")
+        _make_fake_session_dir(tmp_path, project_dir, "sess-111", _SAMPLE_ENTRIES)
+        _make_fake_session_dir(tmp_path, project_dir, "sess-222", _SAMPLE_ENTRIES)
+        env = _cli_env(tmp_path)
+
+        result = sp.run(
+            [sys.executable, SCRIPT, "--backfill", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "Indexing 2 of 2 session(s)" in result.stdout
+        assert "Done. Indexed 2 session(s)" in result.stdout
+
+        from lib.index_builder import load_index
+        entries = load_index(Path(project_dir) / ".surface")
+        assert len(entries) == 2
+
+    def test_backfill_skips_already_indexed(self, tmp_path):
+        """--backfill skips sessions that are already indexed."""
+        project_dir = str(tmp_path / "myproject")
+        _make_fake_session_dir(tmp_path, project_dir, "sess-eee", _SAMPLE_ENTRIES)
+        _make_fake_session_dir(tmp_path, project_dir, "sess-fff", _SAMPLE_ENTRIES)
+        env = _cli_env(tmp_path)
+
+        # Index one session first
+        sp.run(
+            [sys.executable, SCRIPT, "--session-id", "sess-eee", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+
+        # Backfill should only index the remaining one
+        result = sp.run(
+            [sys.executable, SCRIPT, "--backfill", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "Indexing 1 of 2 session(s)" in result.stdout
+
+        from lib.index_builder import load_index
+        entries = load_index(Path(project_dir) / ".surface")
+        assert len(entries) == 2

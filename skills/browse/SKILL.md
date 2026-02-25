@@ -19,7 +19,9 @@ Read the file `.surface/session-index.jsonl` in the current working directory.
 
 If the file does not exist or is empty, inform the user:
 
-> No indexed sessions found. The session index populates automatically when Claude Code sessions end. Run a plan-mode session first, then return here to browse.
+> No indexed sessions found. The session index populates automatically when Claude Code sessions end.
+>
+> To index sessions from before the plugin was installed, run: `/surface:index`
 >
 > To describe a specific session directly, use: `/surface:describe <session-id>`
 

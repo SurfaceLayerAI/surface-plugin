@@ -21,6 +21,7 @@ Each directory with a `CLAUDE.md` has one to help agents navigate the codebase. 
 - `.claude-plugin/plugin.json` — Plugin metadata
 - `skills/describe/SKILL.md` — `/surface:describe` skill: extracts signals and synthesizes PR descriptions
 - `skills/browse/SKILL.md` — `/surface:browse` skill: interactive session browser
+- `skills/index/SKILL.md` — `/surface:index` skill: retroactive session indexing
 - `hooks/hooks.json` — SessionEnd hook for automatic session indexing
 - `agents/indexer.md` — Summarizer prompt template for session indexing
 - `scripts/` — Python extraction and indexing pipeline (see `scripts/CLAUDE.md`)

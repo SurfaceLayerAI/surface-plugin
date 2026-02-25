@@ -32,6 +32,26 @@ def load_index(surface_dir):
     return entries
 
 
+def replace_index_entry(surface_dir, entry):
+    # type: (Path, dict) -> None
+    """Replace an existing entry with the same session_id, or append if not found."""
+    entries = load_index(surface_dir)
+    session_id = entry.get("session_id")
+    entries = [e for e in entries if e.get("session_id") != session_id]
+    entries.append(entry)
+    _write_index(surface_dir, entries)
+
+
+def _write_index(surface_dir, entries):
+    # type: (Path, list) -> None
+    """Overwrite session-index.jsonl with the given entries."""
+    surface_dir.mkdir(parents=True, exist_ok=True)
+    index_path = surface_dir / "session-index.jsonl"
+    with open(index_path, "w", encoding="utf-8") as f:
+        for e in entries:
+            f.write(json.dumps(e) + "\n")
+
+
 def get_recent_plan_sessions(surface_dir, limit=4):
     # type: (Path, int) -> List[dict]
     """Return the most recent plan sessions from the index."""
