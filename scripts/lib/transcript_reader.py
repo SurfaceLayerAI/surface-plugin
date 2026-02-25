@@ -50,20 +50,45 @@ def get_content_blocks(entry: dict) -> List[dict]:
     return []
 
 
+def extract_user_text(entry):
+    # type: (dict) -> str
+    """Extract concatenated text content from a user entry.
+
+    Content may be a string or a list of content blocks.
+    Returns the joined text of all text-type blocks, or empty string.
+    """
+    content = entry.get("message", {}).get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+        return " ".join(parts)
+    return ""
+
+
+_SYSTEM_TAGS = ("<local-command-caveat>", "<local-command-stdout>", "<command-name>")
+
+
 def is_system_entry(entry: dict) -> bool:
     """True for meta/system entries.
 
     An entry is a system entry if:
     - entry.get("isMeta") is truthy, OR
     - The entry type is "user" and any text content block contains
-      "<local-command-caveat>" as a substring.
+      a CLI-generated tag (local-command-caveat, local-command-stdout,
+      or command-name for slash commands like /clear).
     """
     if entry.get("isMeta"):
         return True
 
     if entry.get("type") == "user":
         for block in get_content_blocks(entry):
-            if block.get("type") == "text" and "<local-command-caveat>" in block.get("text", ""):
-                return True
+            text = block.get("text", "") if block.get("type") == "text" else ""
+            for tag in _SYSTEM_TAGS:
+                if tag in text:
+                    return True
 
     return False

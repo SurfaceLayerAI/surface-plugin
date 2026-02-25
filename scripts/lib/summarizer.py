@@ -51,7 +51,11 @@ def _build_prompt(metadata, plugin_root):
 def _structural_fallback(metadata):
     # type: (dict) -> str
     """Produce a structural summary without LLM."""
-    request = metadata.get("initial_request", "unknown task")[:100]
+    user_messages = metadata.get("user_messages", [])
+    if user_messages:
+        request = user_messages[0][:100]
+    else:
+        request = metadata.get("initial_request", "unknown task")[:100]
     plan_paths = metadata.get("plan_paths", [])
     paths_str = ", ".join(plan_paths) if plan_paths else "none"
     return "Session worked on: {}. Plan files: {}.".format(request, paths_str)

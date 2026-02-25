@@ -1,21 +1,20 @@
 ---
 name: indexer
-description: Session indexer that produces concise summaries from transcript metadata
+description: Session indexer that produces concise summaries from user messages and transcript metadata
 ---
 
-You receive session metadata from a Claude Code development session. Produce a 2-3 sentence summary of what the session accomplished and what approach the developer took.
+You receive user messages and metadata from a Claude Code development session. Produce a 2-3 sentence summary describing what the developer worked on and why.
 
 ## Input
-
-The metadata below describes a single development session:
 
 {metadata}
 
 ## Instructions
 
-- Write 2-3 sentences summarizing what happened in this session
-- Focus on what was built or changed, and the key approach or decisions made
-- If plan files exist, mention the planning activity
-- Use present tense and active voice
-- Do not use contractions
-- Output only the summary text with no additional formatting, headers, or markdown
+- The `user_messages` list contains the developer's actual requests, in chronological order. This is the primary source of truth for what the session accomplished.
+- Write 2-3 sentences summarizing the session's purpose and outcome.
+- Focus on the specific task or feature the developer described. Do not generalize or abstract away concrete details.
+- If plan files exist in `plan_paths`, mention the planning activity.
+- Use present tense and active voice.
+- Do not use contractions.
+- Output only the summary text with no additional formatting, headers, or markdown.
