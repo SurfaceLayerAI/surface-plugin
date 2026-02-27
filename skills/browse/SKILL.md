@@ -19,21 +19,56 @@ Read the file `.surface/session-index.jsonl` in the current working directory.
 
 If the file does not exist or is empty, inform the user:
 
-> No indexed sessions found. The session index populates automatically when Claude Code sessions end.
->
-> To index sessions from before the plugin was installed, run: `/surface:index`
->
+> No indexed sessions found for this project. This is expected when Surface has just been installed. Would you like to backfill session data from your existing Claude Code history?
+
+Then use AskUserQuestion with two options:
+
+| Option | Label | Description |
+|--------|-------|-------------|
+| 1 | Yes, backfill now | Scans your Claude Code history and indexes past sessions for this project |
+| 2 | No thanks | Skip backfill |
+
+If the user accepts, run:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/index_session.py --backfill --project-dir $PWD
+```
+
+Then re-read `.surface/session-index.jsonl` and continue to Step 2. If the backfill produced no sessions, inform the user:
+
+> No sessions found for this project. To describe a specific session directly, use: `/surface:describe <session-id>`
+
+If the user declines, inform them:
+
 > To describe a specific session directly, use: `/surface:describe <session-id>`
 
-### 2. Filter and sort
+### 2. Ask which sessions to display
 
-From the loaded index entries, filter to entries where `plan_mode` is `true`. Sort by `timestamp` descending. Take the top 4 entries.
+Use AskUserQuestion to ask the user which sessions to display. Four options:
 
-If no plan-mode sessions exist, inform the user:
+| Option | Label | Description |
+|--------|-------|-------------|
+| 1 | Plan mode with edits (Recommended) | Sessions where Claude deliberated on approach and made code changes — richest signals for PR descriptions |
+| 2 | Sessions with edits | All sessions that made code changes |
+| 3 | Plan mode sessions | Sessions that used plan mode |
+| 4 | All sessions | No filtering |
 
-> No plan-mode sessions found in the index. The plugin extracts reasoning signals from sessions that use plan mode (where Claude deliberates on approach before implementing). Non-plan sessions are not yet supported.
+### 3. Filter and sort
 
-### 3. Present options
+From the loaded index entries, apply the filter the user chose in Step 2:
+
+- **Plan mode with edits**: `plan_mode == true` AND `made_edits == true`
+- **Sessions with edits**: `made_edits == true`
+- **Plan mode sessions**: `plan_mode == true`
+- **All sessions**: no filtering
+
+Sort by `timestamp` descending. Take the top 4 entries.
+
+If no sessions match the selected filter, inform the user:
+
+> No sessions match the selected filter. Try a broader filter or run `/surface:index` to backfill older sessions.
+
+### 4. Present options
 
 Use AskUserQuestion to present the sessions. Format each option as:
 
@@ -43,7 +78,7 @@ Use AskUserQuestion to present the sessions. Format each option as:
 
 Include an "Other (enter session IDs manually)" option.
 
-### 4. Handle selection
+### 5. Handle selection
 
 If the user selects a session, proceed to generate the PR description. Run the extraction and synthesis workflow:
 
