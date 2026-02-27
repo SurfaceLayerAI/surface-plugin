@@ -489,7 +489,7 @@ class TestCLIMode:
         assert "--project-dir" in result.stdout
 
     def test_list_sessions(self, tmp_path):
-        """--list shows sessions with summary or 'Not Indexed'."""
+        """--list shows sessions with summary or '-'."""
         project_dir = str(tmp_path / "myproject")
         _make_fake_session_dir(tmp_path, project_dir, "sess-aaa", _SAMPLE_ENTRIES)
         env = _cli_env(tmp_path)
@@ -500,7 +500,7 @@ class TestCLIMode:
         )
         assert result.returncode == 0
         assert "sess-aaa" in result.stdout
-        assert "Not Indexed" in result.stdout
+        assert "-" in result.stdout
 
     def test_index_single_session(self, tmp_path):
         """--session-id indexes a single session and writes to .surface/."""
@@ -912,6 +912,59 @@ class TestSessionLinkage:
         metadata = _extract_metadata(transcript, "impl-sess-001")
         result = _resolve_continues_session(surface_dir, metadata["referenced_plan_paths"])
         assert result == "plan-sess-001"
+
+    def test_continues_session_resolved_via_slug(self, tmp_path):
+        """Edit session with slug but no plan path refs links to plan session."""
+        from index_session import _resolve_continues_session
+        from lib.index_builder import append_index_entry
+
+        surface_dir = tmp_path / ".surface"
+        plan_path = "/home/user/.claude/plans/my-cool-plan.md"
+
+        # Pre-seed index with plan session
+        append_index_entry(surface_dir, {
+            "session_id": "plan-sess-slug",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "summary": "Plan cool feature",
+            "plan_mode": True,
+            "plan_paths": [plan_path],
+        })
+
+        # Slug matches the plan file basename, but no referenced_plan_paths
+        result = _resolve_continues_session(surface_dir, [], "my-cool-plan")
+        assert result == "plan-sess-slug"
+
+    def test_slug_extracted_from_transcript(self, tmp_path):
+        """Slug field on transcript entries is captured in metadata."""
+        transcript = tmp_path / "session.jsonl"
+        _make_transcript(transcript, [
+            {
+                "type": "user",
+                "slug": "soft-meandering-tulip",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "Implement the plan"},
+            },
+        ])
+        from index_session import _extract_metadata
+        metadata = _extract_metadata(transcript, "test-slug")
+        assert metadata["slug"] == "soft-meandering-tulip"
+
+    def test_slug_no_match_returns_none(self, tmp_path):
+        """Slug that doesn't match any plan path basename returns None."""
+        from index_session import _resolve_continues_session
+        from lib.index_builder import append_index_entry
+
+        surface_dir = tmp_path / ".surface"
+        append_index_entry(surface_dir, {
+            "session_id": "plan-sess-other",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "summary": "Plan other feature",
+            "plan_mode": True,
+            "plan_paths": ["/home/user/.claude/plans/other-plan.md"],
+        })
+
+        result = _resolve_continues_session(surface_dir, [], "unrelated-slug")
+        assert result is None
 
     def test_continues_session_not_set_when_no_match(self, tmp_path):
         """Referenced plan paths that match no index entry return None."""

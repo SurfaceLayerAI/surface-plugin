@@ -67,7 +67,7 @@ def _hook_main():
 
     # Resolve session linkage
     continues_session = _resolve_continues_session(
-        surface_dir, metadata.get("referenced_plan_paths", [])
+        surface_dir, metadata.get("referenced_plan_paths", []), metadata.get("slug")
     )
     if continues_session:
         entry["continues_session"] = continues_session
@@ -177,7 +177,7 @@ def _index_single(session_id, project_dir, surface_dir, force):
 
     # Resolve session linkage
     continues_session = _resolve_continues_session(
-        surface_dir, metadata.get("referenced_plan_paths", [])
+        surface_dir, metadata.get("referenced_plan_paths", []), metadata.get("slug")
     )
     if continues_session:
         entry["continues_session"] = continues_session
@@ -236,7 +236,7 @@ def _backfill(project_dir, surface_dir, force, limit=None):
 
             # Resolve session linkage
             continues_session = _resolve_continues_session(
-                surface_dir, metadata.get("referenced_plan_paths", [])
+                surface_dir, metadata.get("referenced_plan_paths", []), metadata.get("slug")
             )
             if continues_session:
                 entry["continues_session"] = continues_session
@@ -268,7 +268,7 @@ def _list_sessions_with_status(project_dir, surface_dir):
     for session in sessions:
         sid = session["session_id"]
         indexed_entry = index_map.get(sid)
-        summary = indexed_entry.get("summary", "Not Indexed") if indexed_entry else "Not Indexed"
+        summary = indexed_entry.get("summary", "-") if indexed_entry else "-"
 
         if indexed_entry and "plan_mode" in indexed_entry:
             plan_str = "Yes" if indexed_entry["plan_mode"] else "No"
@@ -390,12 +390,16 @@ def _extract_metadata(transcript_path, session_id):
     timestamps = []
     plan_mode = False
     made_edits = False
+    slug = None
     budget_remaining = _TOTAL_USER_BUDGET
 
     for entry in iter_entries(transcript_path):
         ts = entry.get("timestamp", "")
         if ts:
             timestamps.append(ts)
+
+        if not slug:
+            slug = entry.get("slug")
 
         entry_type = entry.get("type", "")
 
@@ -478,24 +482,37 @@ def _extract_metadata(transcript_path, session_id):
         "referenced_plan_paths": referenced_plan_paths,
         "plan_mode": plan_mode,
         "made_edits": made_edits,
+        "slug": slug,
         "timestamp_start": timestamps[0] if timestamps else "",
         "timestamp_end": timestamps[-1] if timestamps else "",
     }
 
 
-def _resolve_continues_session(surface_dir, referenced_plan_paths):
-    # type: (Path, list) -> str
-    """Find a plan-mode session whose plan_paths overlap with referenced_plan_paths."""
-    if not referenced_plan_paths:
+def _resolve_continues_session(surface_dir, referenced_plan_paths, slug=None):
+    # type: (Path, list, str) -> str
+    """Find a plan-mode session whose plan_paths overlap with referenced_plan_paths or slug."""
+    if not referenced_plan_paths and not slug:
         return None
     entries = load_index(surface_dir)
     plan_entries = [e for e in entries if e.get("plan_mode")]
     plan_entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
-    ref_set = set(referenced_plan_paths)
-    for entry in plan_entries:
-        entry_plan_paths = set(entry.get("plan_paths", []))
-        if ref_set & entry_plan_paths:
-            return entry.get("session_id")
+
+    # Primary: plan path overlap
+    if referenced_plan_paths:
+        ref_set = set(referenced_plan_paths)
+        for entry in plan_entries:
+            entry_plan_paths = set(entry.get("plan_paths", []))
+            if ref_set & entry_plan_paths:
+                return entry.get("session_id")
+
+    # Fallback: match slug against plan_paths basenames
+    if slug:
+        slug_suffix = "/" + slug + ".md"
+        for entry in plan_entries:
+            for pp in entry.get("plan_paths", []):
+                if pp.endswith(slug_suffix):
+                    return entry.get("session_id")
+
     return None
 
 

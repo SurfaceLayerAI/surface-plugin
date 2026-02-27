@@ -44,7 +44,7 @@ class TestPrintPlain:
         """Plain output includes header, separator, and all rows."""
         rows = [
             {"session_id": "sess-001", "summary": "First", "plan_mode": "Yes", "made_edits": "No"},
-            {"session_id": "sess-002", "summary": "Not Indexed", "plan_mode": "-", "made_edits": "-"},
+            {"session_id": "sess-002", "summary": "-", "plan_mode": "-", "made_edits": "-"},
         ]
         _print_plain(rows)
         captured = capsys.readouterr()
@@ -57,12 +57,12 @@ class TestPrintPlain:
         assert "First" in captured.out
         assert "Yes" in captured.out
         assert "sess-002" in captured.out
-        assert "Not Indexed" in captured.out
+        assert "-" in captured.out
 
     def test_dash_for_missing_fields(self, capsys):
         """Unindexed sessions display '-' for plan and edits columns."""
         rows = [
-            {"session_id": "sess-003", "summary": "Not Indexed", "plan_mode": "-", "made_edits": "-"},
+            {"session_id": "sess-003", "summary": "-", "plan_mode": "-", "made_edits": "-"},
         ]
         _print_plain(rows)
         captured = capsys.readouterr()
