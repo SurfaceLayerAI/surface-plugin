@@ -70,7 +70,7 @@ class MainTranscriptExtractor:
                     self.first_user_seen = True
                     text = _extract_user_text(entry)
                     signals.append(make_signal(USER_REQUEST, ts, content=text))
-                elif self.last_plan_tool_use_id is not None:
+                elif self.last_plan_tool_use_id is not None and not self.code_writing_started:
                     text = _extract_user_text(entry)
                     signals.append(make_signal(
                         USER_FEEDBACK,
@@ -115,7 +115,7 @@ class MainTranscriptExtractor:
                             self._last_plan_path = file_path
 
                     # Thinking decisions
-                    if block_type == "thinking":
+                    if block_type == "thinking" and not self.code_writing_started:
                         thinking_text = block.get("thinking", "")
                         if DECISION_RE.search(thinking_text):
                             signals.append(make_signal(

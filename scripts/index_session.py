@@ -60,6 +60,7 @@ def _hook_main():
         "summary": metadata["summary"],
         "plan_mode": metadata.get("plan_mode", False),
         "plan_paths": metadata.get("plan_paths", []),
+        "made_edits": metadata.get("made_edits", False),
     }
 
     # Append to index
@@ -120,6 +121,7 @@ def _index_single(session_id, project_dir, surface_dir, force):
         "summary": metadata["summary"],
         "plan_mode": metadata.get("plan_mode", False),
         "plan_paths": metadata.get("plan_paths", []),
+        "made_edits": metadata.get("made_edits", False),
     }
 
     if force:
@@ -165,6 +167,7 @@ def _backfill(project_dir, surface_dir, force):
                 "summary": metadata["summary"],
                 "plan_mode": metadata.get("plan_mode", False),
                 "plan_paths": metadata.get("plan_paths", []),
+                "made_edits": metadata.get("made_edits", False),
             }
 
             if force:
@@ -271,6 +274,7 @@ def _extract_metadata(transcript_path, session_id):
     plan_paths = []
     timestamps = []
     plan_mode = False
+    made_edits = False
     budget_remaining = _TOTAL_USER_BUDGET
 
     for entry in iter_entries(transcript_path):
@@ -293,17 +297,45 @@ def _extract_metadata(transcript_path, session_id):
                     user_messages.append(truncated)
                     budget_remaining -= len(truncated)
 
-        # Detect plan writes
+        # Detect plan writes and code edits
         if entry_type == "assistant":
             for block in get_content_blocks(entry):
-                if (isinstance(block, dict)
-                    and block.get("type") == "tool_use"
-                    and block.get("name") == "Write"):
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                name = block.get("name", "")
+                if name == "Write":
                     file_path = block.get("input", {}).get("file_path", "")
                     if "plan" in file_path.lower():
                         plan_mode = True
                         if file_path not in plan_paths:
                             plan_paths.append(file_path)
+                    else:
+                        made_edits = True
+                elif name == "Edit":
+                    file_path = block.get("input", {}).get("file_path", "")
+                    if "plan" not in file_path.lower():
+                        made_edits = True
+
+    # Fallback: check subagent transcripts for edits
+    if not made_edits:
+        subagents_dir = transcript_path.parent / "subagents"
+        if subagents_dir.is_dir():
+            for agent_file in sorted(subagents_dir.glob("agent-*.jsonl")):
+                for entry in iter_entries(agent_file):
+                    if entry.get("type") != "assistant":
+                        continue
+                    for block in get_content_blocks(entry):
+                        if (isinstance(block, dict)
+                            and block.get("type") == "tool_use"
+                            and block.get("name") in ("Write", "Edit")):
+                            file_path = block.get("input", {}).get("file_path", "")
+                            if "plan" not in file_path.lower():
+                                made_edits = True
+                                break
+                    if made_edits:
+                        break
+                if made_edits:
+                    break
 
     initial_request = user_messages[0][:500] if user_messages else ""
 
@@ -313,6 +345,7 @@ def _extract_metadata(transcript_path, session_id):
         "user_messages": user_messages,
         "plan_paths": plan_paths,
         "plan_mode": plan_mode,
+        "made_edits": made_edits,
         "timestamp_start": timestamps[0] if timestamps else "",
         "timestamp_end": timestamps[-1] if timestamps else "",
     }

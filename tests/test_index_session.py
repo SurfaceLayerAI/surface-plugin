@@ -204,6 +204,136 @@ class TestIndexSession:
         assert metadata["user_messages"] == ["Build the auth system"]
         assert metadata["initial_request"] == "Build the auth system"
 
+    def test_made_edits_write_non_plan(self, tmp_path):
+        """Write to a non-plan file sets made_edits True."""
+        entries = [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "Add auth"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2024-01-01T00:01:00Z",
+                "message": {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Write",
+                     "input": {"file_path": "src/auth.py", "content": "# auth"}},
+                ]},
+            },
+        ]
+        transcript_path = tmp_path / "session.jsonl"
+        _make_transcript(transcript_path, entries)
+        from index_session import _extract_metadata
+        metadata = _extract_metadata(transcript_path, "test-edits-write")
+        assert metadata["made_edits"] is True
+
+    def test_made_edits_edit_non_plan(self, tmp_path):
+        """Edit to a non-plan file sets made_edits True."""
+        entries = [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "Fix bug"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2024-01-01T00:01:00Z",
+                "message": {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Edit",
+                     "input": {"file_path": "src/main.py", "old_string": "x", "new_string": "y"}},
+                ]},
+            },
+        ]
+        transcript_path = tmp_path / "session.jsonl"
+        _make_transcript(transcript_path, entries)
+        from index_session import _extract_metadata
+        metadata = _extract_metadata(transcript_path, "test-edits-edit")
+        assert metadata["made_edits"] is True
+
+    def test_made_edits_plan_only(self, tmp_path):
+        """Only writing plan files does not set made_edits."""
+        entries = [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "Plan the feature"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2024-01-01T00:01:00Z",
+                "message": {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Write",
+                     "input": {"file_path": "plans/feature-plan.md", "content": "# Plan"}},
+                ]},
+            },
+        ]
+        transcript_path = tmp_path / "session.jsonl"
+        _make_transcript(transcript_path, entries)
+        from index_session import _extract_metadata
+        metadata = _extract_metadata(transcript_path, "test-edits-plan")
+        assert metadata["made_edits"] is False
+        assert metadata["plan_mode"] is True
+
+    def test_made_edits_no_tool_calls(self, tmp_path):
+        """Session with no assistant tool calls has made_edits False."""
+        entries = [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "What does this code do?"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2024-01-01T00:01:00Z",
+                "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "It does X."},
+                ]},
+            },
+        ]
+        transcript_path = tmp_path / "session.jsonl"
+        _make_transcript(transcript_path, entries)
+        from index_session import _extract_metadata
+        metadata = _extract_metadata(transcript_path, "test-edits-none")
+        assert metadata["made_edits"] is False
+
+    def test_made_edits_from_subagent(self, tmp_path):
+        """Subagent Write sets made_edits True when main transcript has none."""
+        # Main transcript: no edits
+        entries = [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "Build feature"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2024-01-01T00:01:00Z",
+                "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "Delegating to subagent."},
+                ]},
+            },
+        ]
+        transcript_path = tmp_path / "session.jsonl"
+        _make_transcript(transcript_path, entries)
+
+        # Subagent transcript: has a Write
+        subagents_dir = tmp_path / "subagents"
+        subagent_entries = [
+            {
+                "type": "assistant",
+                "timestamp": "2024-01-01T00:02:00Z",
+                "message": {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "s1", "name": "Write",
+                     "input": {"file_path": "src/feature.py", "content": "# feature"}},
+                ]},
+            },
+        ]
+        _make_transcript(subagents_dir / "agent-abc123.jsonl", subagent_entries)
+
+        from index_session import _extract_metadata
+        metadata = _extract_metadata(transcript_path, "test-edits-subagent")
+        assert metadata["made_edits"] is True
+
     def test_indexes_session_subprocess(self, tmp_path):
         """Test running index_session.py as subprocess with mocked claude."""
         import subprocess as sp

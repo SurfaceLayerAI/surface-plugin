@@ -173,6 +173,71 @@ def test_stops_exploration_after_code_write(write_jsonl):
     assert exploration[0]["tool_name"] == "Read"
 
 
+def test_stops_thinking_after_code_write(write_jsonl):
+    path = write_jsonl("t.jsonl", [
+        {"type": "assistant", "timestamp": "2026-01-01T00:01:00Z", "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "thinking",
+                "thinking": "I considered REST but decided GraphQL is better",
+            }],
+        }},
+        {"type": "assistant", "timestamp": "2026-01-01T00:02:00Z", "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "tool_use", "id": "toolu_w1", "name": "Write",
+                "input": {"file_path": "src/handler.ts", "content": "code"},
+            }],
+        }},
+        {"type": "assistant", "timestamp": "2026-01-01T00:03:00Z", "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "thinking",
+                "thinking": "I considered using a map but decided an array is simpler",
+            }],
+        }},
+    ])
+    signals = MainTranscriptExtractor().extract(path)
+    decisions = [s for s in signals if s["type"] == THINKING_DECISION]
+    assert len(decisions) == 1
+    assert "GraphQL" in decisions[0]["content"]
+
+
+def test_stops_user_feedback_after_code_write(write_jsonl):
+    path = write_jsonl("t.jsonl", [
+        {"type": "user", "timestamp": "2026-01-01T00:00:00Z", "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": "Initial request"}],
+        }},
+        {"type": "assistant", "timestamp": "2026-01-01T00:01:00Z", "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "tool_use", "id": "toolu_001", "name": "Write",
+                "input": {"file_path": "plans/design.md", "content": "plan"},
+            }],
+        }},
+        {"type": "user", "timestamp": "2026-01-01T00:02:00Z", "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": "Use TypeScript instead"}],
+        }},
+        {"type": "assistant", "timestamp": "2026-01-01T00:03:00Z", "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "tool_use", "id": "toolu_w1", "name": "Write",
+                "input": {"file_path": "src/handler.ts", "content": "code"},
+            }],
+        }},
+        {"type": "user", "timestamp": "2026-01-01T00:04:00Z", "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": "Fix the import path"}],
+        }},
+    ])
+    signals = MainTranscriptExtractor().extract(path)
+    feedback = [s for s in signals if s["type"] == USER_FEEDBACK]
+    assert len(feedback) == 1
+    assert feedback[0]["content"] == "Use TypeScript instead"
+
+
 def test_skips_system_entries_for_user_request(write_jsonl):
     path = write_jsonl("t.jsonl", [
         {"type": "user", "timestamp": "2026-01-01T00:00:00Z", "isMeta": True, "message": {
