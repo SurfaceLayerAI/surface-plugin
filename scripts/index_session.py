@@ -269,7 +269,23 @@ def _list_sessions_with_status(project_dir, surface_dir):
         sid = session["session_id"]
         indexed_entry = index_map.get(sid)
         summary = indexed_entry.get("summary", "Not Indexed") if indexed_entry else "Not Indexed"
-        rows.append({"session_id": sid, "summary": summary})
+
+        if indexed_entry and "plan_mode" in indexed_entry:
+            plan_str = "Yes" if indexed_entry["plan_mode"] else "No"
+        else:
+            plan_str = "-"
+
+        if indexed_entry and "made_edits" in indexed_entry:
+            edits_str = "Yes" if indexed_entry["made_edits"] else "No"
+        else:
+            edits_str = "-"
+
+        rows.append({
+            "session_id": sid,
+            "summary": summary,
+            "plan_mode": plan_str,
+            "made_edits": edits_str,
+        })
 
     if sys.stdout.isatty():
         from lib.pager import run_pager
