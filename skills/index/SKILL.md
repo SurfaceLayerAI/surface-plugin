@@ -53,13 +53,13 @@ If all sessions are already indexed, inform the user:
 
 **If backfill:**
 
-Run:
+Run with `--limit 10` to index the 10 most recent unindexed sessions:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/index_session.py --backfill --project-dir $PWD
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/index_session.py --backfill --limit 10 --project-dir $PWD
 ```
 
-Report the results to the user.
+Report the results to the user. If there are additional unindexed sessions beyond the limit, inform the user and offer to index all remaining sessions (omit `--limit`) or a custom count (e.g. `--limit 50`).
 
 **If specific sessions:**
 

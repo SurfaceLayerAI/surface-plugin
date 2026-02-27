@@ -72,12 +72,55 @@ def _hook_main():
 
 def _cli_main():
     """CLI mode for retroactive session indexing."""
-    parser = argparse.ArgumentParser(description="Index Claude Code sessions")
-    parser.add_argument("--session-id", help="Session ID to index")
-    parser.add_argument("--backfill", action="store_true", help="Index all unindexed sessions")
-    parser.add_argument("--list", action="store_true", dest="list_sessions", help="List sessions with index status")
-    parser.add_argument("--project-dir", required=True, help="Project directory")
-    parser.add_argument("--force", action="store_true", help="Re-index already-indexed sessions")
+    parser = argparse.ArgumentParser(
+        description="Index Claude Code sessions for the Surface plugin. "
+        "Supports single-session indexing, batch backfill, and listing.",
+        epilog="Examples:\n"
+        "  %(prog)s --list --project-dir /path/to/repo\n"
+        "  %(prog)s --backfill --limit 10 --project-dir /path/to/repo\n"
+        "  %(prog)s --backfill --project-dir /path/to/repo          # all unindexed\n"
+        "  %(prog)s --session-id abc123 --project-dir /path/to/repo\n"
+        "  %(prog)s --session-id abc123 --force --project-dir /path/to/repo",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--session-id",
+        help="Index a single session by its ID. The session transcript must exist "
+        "in the Claude Code sessions directory for the given --project-dir.",
+    )
+    parser.add_argument(
+        "--backfill",
+        action="store_true",
+        help="Index all unindexed sessions for the project. Combine with --limit "
+        "to cap how many sessions are indexed (most recent first).",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum number of sessions to index during --backfill. Sessions are "
+        "ordered by recency, so --limit 10 indexes the 10 most recent unindexed "
+        "sessions. Omit to index all unindexed sessions.",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        dest="list_sessions",
+        help="List all discovered sessions with their index status (indexed or not). "
+        "Output is paged in a TTY, plain text otherwise.",
+    )
+    parser.add_argument(
+        "--project-dir",
+        required=True,
+        help="Absolute path to the project directory. Used to locate session "
+        "transcripts and the .surface/ output directory.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-index sessions that are already in the index. Works with both "
+        "--session-id and --backfill.",
+    )
     args = parser.parse_args()
 
     surface_dir = Path(args.project_dir) / ".surface"
@@ -86,7 +129,7 @@ def _cli_main():
         return _list_sessions_with_status(args.project_dir, surface_dir)
 
     if args.backfill:
-        return _backfill(args.project_dir, surface_dir, args.force)
+        return _backfill(args.project_dir, surface_dir, args.force, args.limit)
 
     if args.session_id:
         return _index_single(args.session_id, args.project_dir, surface_dir, args.force)
@@ -132,8 +175,8 @@ def _index_single(session_id, project_dir, surface_dir, force):
     print("Indexed: {} - {}".format(session_id, entry["summary"][:80]))
 
 
-def _backfill(project_dir, surface_dir, force):
-    # type: (str, Path, bool) -> None
+def _backfill(project_dir, surface_dir, force, limit=None):
+    # type: (str, Path, bool, int) -> None
     """Index all unindexed sessions for the project."""
     sessions = list_sessions(project_dir)
     if not sessions:
@@ -149,7 +192,13 @@ def _backfill(project_dir, surface_dir, force):
         print("All {} session(s) are already indexed.".format(len(sessions)))
         return
 
-    print("Indexing {} of {} session(s)...".format(len(to_index), len(sessions)))
+    total_unindexed = len(to_index)
+    if limit is not None and limit < len(to_index):
+        to_index = to_index[:limit]
+        print("Indexing {} of {} unindexed session(s) (limited to {} most recent)...".format(
+            len(to_index), total_unindexed, limit))
+    else:
+        print("Indexing {} of {} session(s)...".format(len(to_index), len(sessions)))
     indexed_count = 0
 
     for i, session in enumerate(to_index, 1):

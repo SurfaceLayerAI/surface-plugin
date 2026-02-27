@@ -31,7 +31,7 @@ Then use AskUserQuestion with two options:
 If the user accepts, run:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/index_session.py --backfill --project-dir $PWD
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/index_session.py --backfill --limit 10 --project-dir $PWD
 ```
 
 Then re-read `.surface/session-index.jsonl` and continue to Step 2. If the backfill produced no sessions, inform the user:

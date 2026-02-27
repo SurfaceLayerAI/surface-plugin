@@ -628,6 +628,50 @@ class TestCLIMode:
         entries = load_index(Path(project_dir) / ".surface")
         assert len(entries) == 2
 
+    def test_backfill_with_limit(self, tmp_path):
+        """--backfill --limit N indexes only the N most recent sessions."""
+        project_dir = str(tmp_path / "myproject")
+        # Create 5 sessions with staggered mtimes so ordering is deterministic
+        for i in range(5):
+            path = _make_fake_session_dir(
+                tmp_path, project_dir, "sess-lim-{:03d}".format(i), _SAMPLE_ENTRIES
+            )
+            # Set mtime: higher i = more recent
+            os.utime(path, (1000000 + i * 100, 1000000 + i * 100))
+        env = _cli_env(tmp_path)
+
+        result = sp.run(
+            [sys.executable, SCRIPT, "--backfill", "--limit", "2", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "limited to 2 most recent" in result.stdout
+        assert "Done. Indexed 2 session(s)" in result.stdout
+
+        from lib.index_builder import load_index
+        entries = load_index(Path(project_dir) / ".surface")
+        assert len(entries) == 2
+
+    def test_backfill_limit_exceeds_available(self, tmp_path):
+        """--limit higher than available sessions indexes all of them."""
+        project_dir = str(tmp_path / "myproject")
+        _make_fake_session_dir(tmp_path, project_dir, "sess-exc-001", _SAMPLE_ENTRIES)
+        _make_fake_session_dir(tmp_path, project_dir, "sess-exc-002", _SAMPLE_ENTRIES)
+        env = _cli_env(tmp_path)
+
+        result = sp.run(
+            [sys.executable, SCRIPT, "--backfill", "--limit", "10", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        # Limit exceeds available, so normal message (no "limited to" text)
+        assert "limited to" not in result.stdout
+        assert "Done. Indexed 2 session(s)" in result.stdout
+
+        from lib.index_builder import load_index
+        entries = load_index(Path(project_dir) / ".surface")
+        assert len(entries) == 2
+
     def test_list_many_sessions_pipe(self, tmp_path):
         """--list in non-TTY mode shows all sessions (no truncation)."""
         project_dir = str(tmp_path / "myproject")
