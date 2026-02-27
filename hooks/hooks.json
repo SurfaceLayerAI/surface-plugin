@@ -3,11 +3,11 @@
   "hooks": {
     "SessionEnd": [
       {
-        "matcher": "*",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/index_session.py"
+            "command": "python3 scripts/index_session.py"
           }
         ]
       }
