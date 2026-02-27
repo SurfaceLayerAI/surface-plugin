@@ -23,6 +23,10 @@ If no session IDs are provided, inform the user:
 
 ## Steps
 
+### 0. Expand linked sessions
+
+Before extraction, read `.surface/session-index.jsonl` and expand each provided session ID to include any linked sessions. Two sessions are linked when one has a `continues_session` field pointing to the other (plan session ended with "Clear Context and Implement Plan"). Follow links in both directions and deduplicate. Proceed with the expanded list.
+
 ### 1. Extract signals
 
 For each session ID in `$ARGUMENTS`:

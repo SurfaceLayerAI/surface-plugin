@@ -760,8 +760,56 @@ class TestSessionEndFiltering:
         from index_session import _should_index
         assert _should_index({"reason": "other", "transcript_path": "/nonexistent/path.jsonl"}) is False
 
+    def test_clear_with_plan_content_indexed(self, tmp_path):
+        """reason='clear' with plan file writes should be indexed."""
+        from index_session import _should_index
+        transcript = tmp_path / "session.jsonl"
+        _make_transcript(transcript, [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "Plan the auth feature"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2024-01-01T00:01:00Z",
+                "message": {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Write",
+                     "input": {"file_path": "/home/user/.claude/plans/auth-plan.md",
+                               "content": "# Auth Plan"}},
+                ]},
+            },
+        ])
+        assert _should_index({
+            "reason": "clear",
+            "transcript_path": str(transcript),
+        }) is True
+
+    def test_clear_without_plan_content_skipped(self, tmp_path):
+        """reason='clear' with no plan writes should not be indexed."""
+        from index_session import _should_index
+        transcript = tmp_path / "session.jsonl"
+        _make_transcript(transcript, [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "Just chatting"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2024-01-01T00:01:00Z",
+                "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "Hello!"},
+                ]},
+            },
+        ])
+        assert _should_index({
+            "reason": "clear",
+            "transcript_path": str(transcript),
+        }) is False
+
     def test_subprocess_skips_clear(self, tmp_path):
-        """Hook subprocess exits cleanly without indexing on reason='clear'."""
+        """Hook subprocess exits cleanly without indexing on reason='clear' (no plan content)."""
         transcript_path = tmp_path / "session.jsonl"
         _make_transcript(transcript_path, _SAMPLE_ENTRIES)
 
@@ -784,3 +832,102 @@ class TestSessionEndFiltering:
         assert result.returncode == 0
         assert result.stdout.strip() == "{}"
         assert not (tmp_path / ".surface" / "session-index.jsonl").exists()
+
+
+class TestSessionLinkage:
+    """Tests for plan reference extraction and continues_session resolution."""
+
+    def test_referenced_plan_paths_extracted(self, tmp_path):
+        """User entry text containing .claude/plans/foo.md is captured."""
+        transcript = tmp_path / "session.jsonl"
+        _make_transcript(transcript, [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": [
+                    {"type": "text", "text": "Plan file at /home/user/.claude/plans/auth-plan.md is ready"},
+                ]},
+            },
+        ])
+        from index_session import _extract_metadata
+        metadata = _extract_metadata(transcript, "test-ref")
+        assert "/home/user/.claude/plans/auth-plan.md" in metadata["referenced_plan_paths"]
+
+    def test_referenced_plan_paths_from_read(self, tmp_path):
+        """Assistant Read tool_use targeting .claude/plans/ is captured."""
+        transcript = tmp_path / "session.jsonl"
+        _make_transcript(transcript, [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "Implement the plan"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2024-01-01T00:01:00Z",
+                "message": {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Read",
+                     "input": {"file_path": "/home/user/.claude/plans/auth-plan.md"}},
+                ]},
+            },
+        ])
+        from index_session import _extract_metadata
+        metadata = _extract_metadata(transcript, "test-read-ref")
+        assert "/home/user/.claude/plans/auth-plan.md" in metadata["referenced_plan_paths"]
+
+    def test_continues_session_resolved(self, tmp_path):
+        """Implementation session gets continues_session pointing to plan session."""
+        from index_session import _extract_metadata, _resolve_continues_session
+        from lib.index_builder import append_index_entry, load_index
+
+        surface_dir = tmp_path / ".surface"
+        plan_path = "/home/user/.claude/plans/auth-plan.md"
+
+        # Pre-seed index with plan session
+        append_index_entry(surface_dir, {
+            "session_id": "plan-sess-001",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "summary": "Plan auth feature",
+            "plan_mode": True,
+            "plan_paths": [plan_path],
+        })
+
+        # Create implementation transcript referencing the same plan path
+        transcript = tmp_path / "impl-session.jsonl"
+        _make_transcript(transcript, [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T01:00:00Z",
+                "message": {"role": "user", "content": [
+                    {"type": "text", "text": "Plan at " + plan_path + " loaded"},
+                ]},
+            },
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T01:01:00Z",
+                "message": {"role": "user", "content": "Implement auth"},
+            },
+        ])
+
+        metadata = _extract_metadata(transcript, "impl-sess-001")
+        result = _resolve_continues_session(surface_dir, metadata["referenced_plan_paths"])
+        assert result == "plan-sess-001"
+
+    def test_continues_session_not_set_when_no_match(self, tmp_path):
+        """Referenced plan paths that match no index entry return None."""
+        from index_session import _resolve_continues_session
+        from lib.index_builder import append_index_entry
+
+        surface_dir = tmp_path / ".surface"
+        append_index_entry(surface_dir, {
+            "session_id": "plan-sess-other",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "summary": "Plan other feature",
+            "plan_mode": True,
+            "plan_paths": ["/home/user/.claude/plans/other-plan.md"],
+        })
+
+        result = _resolve_continues_session(
+            surface_dir, ["/home/user/.claude/plans/unrelated-plan.md"]
+        )
+        assert result is None

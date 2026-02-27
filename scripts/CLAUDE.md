@@ -6,7 +6,7 @@ Python scripts for signal extraction and session indexing. All stdlib-only, no p
 
 - `extract_signals.py` — CLI entry point for signal extraction. Reads a session transcript, discovers Plan subagents, extracts signals, writes to `.surface/<session_id>.signals.jsonl`.
 - `index_session.py` — Session indexing. Two modes:
-  - **Hook mode** (no CLI args): SessionEnd hook entry point. Reads `{session_id, transcript_path, cwd, reason}` from stdin. Filters non-terminal events (clear, permission changes) before indexing; ambiguous events checked for transcript substance.
+  - **Hook mode** (no CLI args): SessionEnd hook entry point. Reads `{session_id, transcript_path, cwd, reason}` from stdin. Filters non-terminal events (permission changes) before indexing; `reason="clear"` indexed only if transcript has plan file writes. Ambiguous events checked for transcript substance. Resolves `continues_session` linkage via plan path overlap.
   - **CLI mode** (with args): Retroactive indexing. Supports `--session-id <id>`, `--backfill`, `--list`, `--force`, `--project-dir`.
 - `lib/` — Shared modules:
   - `transcript_reader.py` — JSONL streaming parser, content block extraction, system entry detection
@@ -14,7 +14,7 @@ Python scripts for signal extraction and session indexing. All stdlib-only, no p
   - `signal_types.py` — Signal type constants and `make_signal` factory
   - `extractors.py` — `MainTranscriptExtractor` and `PlanSubagentExtractor` classes
   - `summarizer.py` — Builds prompt from `agents/indexer.md`, runs `claude -p`, falls back to structural summary
-  - `index_builder.py` — Reads/writes `.surface/session-index.jsonl`
+  - `index_builder.py` — Reads/writes `.surface/session-index.jsonl`. Provides `get_linked_sessions` for following `continues_session` links in both directions
   - `pager.py` — Interactive curses pager for `--list` output; plain-text fallback for non-TTY
 
 ## Constraints

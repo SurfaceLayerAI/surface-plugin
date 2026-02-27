@@ -59,3 +59,39 @@ def get_recent_plan_sessions(surface_dir, limit=4):
     plan_entries = [e for e in entries if e.get("plan_mode")]
     plan_entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
     return plan_entries[:limit]
+
+
+def get_linked_sessions(surface_dir, session_id):
+    # type: (Path, str) -> List[str]
+    """Return all session IDs linked to session_id via continues_session.
+
+    Follows links in both directions:
+    - Forward: session_id has continues_session pointing to a parent
+    - Reverse: other sessions have continues_session pointing to session_id
+    Returns the full set of linked IDs including session_id itself.
+    """
+    entries = load_index(surface_dir)
+    entry_map = {e.get("session_id"): e for e in entries}
+
+    linked = {session_id}
+    queue = [session_id]
+
+    while queue:
+        current = queue.pop()
+        current_entry = entry_map.get(current, {})
+
+        # Forward: this session continues another
+        parent = current_entry.get("continues_session")
+        if parent and parent not in linked:
+            linked.add(parent)
+            queue.append(parent)
+
+        # Reverse: other sessions continue this one
+        for entry in entries:
+            if entry.get("continues_session") == current:
+                child = entry.get("session_id")
+                if child and child not in linked:
+                    linked.add(child)
+                    queue.append(child)
+
+    return sorted(linked)

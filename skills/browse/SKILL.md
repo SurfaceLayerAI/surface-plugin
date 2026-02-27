@@ -68,24 +68,27 @@ If no sessions match the selected filter, inform the user:
 
 > No sessions match the selected filter. Try a broader filter or run `/surface:index` to backfill older sessions.
 
-### 4. Present options
+### 4. Group linked sessions
+
+After filtering and sorting, group entries linked by `continues_session`. If entry A has `"continues_session": "<id-of-B>"`, entries A and B form a linked pair. Present each linked group as a single item showing both session IDs. When a linked group is selected, pass all session IDs in the group to extraction.
+
+### 5. Present options
 
 Use AskUserQuestion to present the sessions. Format each option as:
 
-```
-[session_id] (timestamp) - summary
-```
+- Standalone session: `[session_id] (timestamp) - summary`
+- Linked sessions: `[plan_session_id + impl_session_id] (timestamp) - summary` (use the implementation session's summary)
 
 Include an "Other (enter session IDs manually)" option.
 
-### 5. Handle selection
+### 6. Handle selection
 
-If the user selects a session, proceed to generate the PR description. Run the extraction and synthesis workflow:
+If the user selects a session (or linked group), proceed to generate the PR description. Run the extraction and synthesis workflow for each session ID:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/extract_signals.py <selected_session_id> --project-dir $PWD --output-dir $PWD/.surface
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/extract_signals.py <session_id> --project-dir $PWD --output-dir $PWD/.surface
 ```
 
-Then read the resulting signals file and synthesize the PR description following the same process described in the `/surface:describe` skill: four sections (Overview, Approach, Tradeoffs, Review Focus), writing style rules, and the offer to create a PR.
+Then read the resulting signals files and synthesize the PR description following the same process described in the `/surface:describe` skill: four sections (Overview, Approach, Tradeoffs, Review Focus), writing style rules, and the offer to create a PR.
 
 If the user selects "Other", ask them to provide session IDs and then proceed with the describe workflow for those IDs.

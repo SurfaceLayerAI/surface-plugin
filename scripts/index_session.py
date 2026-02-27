@@ -3,6 +3,7 @@
 import sys
 import os
 import json
+import re
 import argparse
 from pathlib import Path
 
@@ -54,6 +55,7 @@ def _hook_main():
     metadata["summary"] = summarize_session(metadata, PLUGIN_ROOT)
 
     # Build index entry
+    surface_dir = Path(cwd) / ".surface"
     entry = {
         "session_id": session_id,
         "timestamp": metadata.get("timestamp_end", ""),
@@ -63,8 +65,14 @@ def _hook_main():
         "made_edits": metadata.get("made_edits", False),
     }
 
+    # Resolve session linkage
+    continues_session = _resolve_continues_session(
+        surface_dir, metadata.get("referenced_plan_paths", [])
+    )
+    if continues_session:
+        entry["continues_session"] = continues_session
+
     # Append to index
-    surface_dir = Path(cwd) / ".surface"
     append_index_entry(surface_dir, entry)
 
     print("{}")
@@ -167,6 +175,13 @@ def _index_single(session_id, project_dir, surface_dir, force):
         "made_edits": metadata.get("made_edits", False),
     }
 
+    # Resolve session linkage
+    continues_session = _resolve_continues_session(
+        surface_dir, metadata.get("referenced_plan_paths", [])
+    )
+    if continues_session:
+        entry["continues_session"] = continues_session
+
     if force:
         replace_index_entry(surface_dir, entry)
     else:
@@ -219,6 +234,13 @@ def _backfill(project_dir, surface_dir, force, limit=None):
                 "made_edits": metadata.get("made_edits", False),
             }
 
+            # Resolve session linkage
+            continues_session = _resolve_continues_session(
+                surface_dir, metadata.get("referenced_plan_paths", [])
+            )
+            if continues_session:
+                entry["continues_session"] = continues_session
+
             if force:
                 replace_index_entry(surface_dir, entry)
             else:
@@ -259,7 +281,8 @@ def _list_sessions_with_status(project_dir, surface_dir):
 
 # --- SessionEnd reason filtering ---
 
-_SKIP_REASONS = frozenset(["clear", "prompt_input_exit", "bypass_permissions_disabled"])
+_SKIP_REASONS = frozenset(["prompt_input_exit", "bypass_permissions_disabled"])
+_PLAN_CHECK_REASONS = frozenset(["clear"])
 _INDEX_REASONS = frozenset(["logout"])
 
 
@@ -267,8 +290,9 @@ def _should_index(hook_input):
     # type: (dict) -> bool
     """Decide whether this SessionEnd event warrants indexing.
 
-    Returns False for non-terminal events (clear, permission changes).
+    Returns False for non-terminal events (permission changes).
     Returns True for definitive termination (logout).
+    For plan-check reasons ('clear'), checks transcript for plan file writes.
     For ambiguous reasons ('other', missing), checks transcript for substance.
     """
     reason = hook_input.get("reason", "")
@@ -278,6 +302,12 @@ def _should_index(hook_input):
 
     if reason in _INDEX_REASONS:
         return True
+
+    if reason in _PLAN_CHECK_REASONS:
+        transcript_path = hook_input.get("transcript_path", "")
+        if not transcript_path or not Path(transcript_path).exists():
+            return False
+        return _has_plan_content(Path(transcript_path))
 
     # Ambiguous reason: check transcript for substance
     transcript_path = hook_input.get("transcript_path", "")
@@ -301,6 +331,22 @@ def _has_substantive_content(transcript_path):
     return False
 
 
+def _has_plan_content(transcript_path):
+    # type: (Path) -> bool
+    """True if the transcript writes to plan files (plan-mode session)."""
+    for entry in iter_entries(transcript_path):
+        if entry.get("type") != "assistant":
+            continue
+        for block in get_content_blocks(entry):
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            if block.get("name") == "Write":
+                file_path = block.get("input", {}).get("file_path", "")
+                if "plan" in file_path.lower():
+                    return True
+    return False
+
+
 _TOTAL_USER_BUDGET = 4000
 _PER_MESSAGE_LIMIT = 800
 _NOISE_COMMANDS = ("/clear", "/compact", "/model", "/cost", "/help", "/exit")
@@ -316,11 +362,15 @@ def _is_noise_command(text):
     return False
 
 
+_PLAN_REF_RE = re.compile(r'[^\s"\'<>]*\.claude/plans/[^\s"\'<>]+\.md')
+
+
 def _extract_metadata(transcript_path, session_id):
     # type: (Path, str) -> dict
     """Extract structural metadata from a transcript."""
     user_messages = []
     plan_paths = []
+    referenced_plan_paths = []
     timestamps = []
     plan_mode = False
     made_edits = False
@@ -332,6 +382,17 @@ def _extract_metadata(transcript_path, session_id):
             timestamps.append(ts)
 
         entry_type = entry.get("type", "")
+
+        # Scan ALL user entries for plan path references (including system entries)
+        if entry_type == "user":
+            content = entry.get("message", {}).get("content", "")
+            raw_text = content if isinstance(content, str) else " ".join(
+                b.get("text", "") for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+            for match in _PLAN_REF_RE.findall(raw_text):
+                if match not in referenced_plan_paths:
+                    referenced_plan_paths.append(match)
 
         # Collect non-system user messages within budget
         if entry_type == "user" and not is_system_entry(entry) and budget_remaining > 0:
@@ -364,6 +425,11 @@ def _extract_metadata(transcript_path, session_id):
                     file_path = block.get("input", {}).get("file_path", "")
                     if "plan" not in file_path.lower():
                         made_edits = True
+                elif name == "Read":
+                    file_path = block.get("input", {}).get("file_path", "")
+                    if ".claude/plans/" in file_path and file_path.endswith(".md"):
+                        if file_path not in referenced_plan_paths:
+                            referenced_plan_paths.append(file_path)
 
     # Fallback: check subagent transcripts for edits
     if not made_edits:
@@ -393,11 +459,28 @@ def _extract_metadata(transcript_path, session_id):
         "initial_request": initial_request,
         "user_messages": user_messages,
         "plan_paths": plan_paths,
+        "referenced_plan_paths": referenced_plan_paths,
         "plan_mode": plan_mode,
         "made_edits": made_edits,
         "timestamp_start": timestamps[0] if timestamps else "",
         "timestamp_end": timestamps[-1] if timestamps else "",
     }
+
+
+def _resolve_continues_session(surface_dir, referenced_plan_paths):
+    # type: (Path, list) -> str
+    """Find a plan-mode session whose plan_paths overlap with referenced_plan_paths."""
+    if not referenced_plan_paths:
+        return None
+    entries = load_index(surface_dir)
+    plan_entries = [e for e in entries if e.get("plan_mode")]
+    plan_entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+    ref_set = set(referenced_plan_paths)
+    for entry in plan_entries:
+        entry_plan_paths = set(entry.get("plan_paths", []))
+        if ref_set & entry_plan_paths:
+            return entry.get("session_id")
+    return None
 
 
 if __name__ == "__main__":
