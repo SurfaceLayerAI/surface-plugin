@@ -280,7 +280,19 @@ def _list_sessions_with_status(project_dir, surface_dir):
         else:
             edits_str = "-"
 
+        if indexed_entry and indexed_entry.get("timestamp"):
+            ts_raw = indexed_entry["timestamp"]
+            from datetime import datetime
+            try:
+                dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                ts_str = dt.strftime("%b %d %H:%M")
+            except (ValueError, AttributeError):
+                ts_str = "-"
+        else:
+            ts_str = "-"
+
         rows.append({
+            "timestamp": ts_str,
             "session_id": sid,
             "summary": summary,
             "plan_mode": plan_str,

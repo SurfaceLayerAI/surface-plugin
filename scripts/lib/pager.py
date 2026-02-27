@@ -2,19 +2,20 @@
 import shutil
 import textwrap
 
+_TIMESTAMP_WIDTH = 14
 _SESSION_ID_WIDTH = 38
 _PLAN_WIDTH = 7
 _EDITS_WIDTH = 8
-_PREFIX_WIDTH = _SESSION_ID_WIDTH + _PLAN_WIDTH + _EDITS_WIDTH
+_PREFIX_WIDTH = _TIMESTAMP_WIDTH + _SESSION_ID_WIDTH + _PLAN_WIDTH + _EDITS_WIDTH
 
-_HEADER = "{:<{iw}}{:<{pw}}{:<{ew}}{}".format(
-    "SESSION ID", "PLAN", "EDITS", "SUMMARY",
-    iw=_SESSION_ID_WIDTH, pw=_PLAN_WIDTH, ew=_EDITS_WIDTH,
+_HEADER = "{:<{tw}}{:<{iw}}{:<{pw}}{:<{ew}}{}".format(
+    "TIMESTAMP", "SESSION ID", "PLAN", "EDITS", "SUMMARY",
+    tw=_TIMESTAMP_WIDTH, iw=_SESSION_ID_WIDTH, pw=_PLAN_WIDTH, ew=_EDITS_WIDTH,
 )
 
 
-def format_row(session_id, plan_mode, made_edits, summary, summary_width):
-    # type: (str, str, str, str, int) -> list
+def format_row(timestamp, session_id, plan_mode, made_edits, summary, summary_width):
+    # type: (str, str, str, str, str, int) -> list
     """Format a single row into display lines with text wrapping.
 
     Returns a list of strings. The first line contains all columns;
@@ -26,9 +27,9 @@ def format_row(session_id, plan_mode, made_edits, summary, summary_width):
     wrapped = textwrap.wrap(summary, width=summary_width) if summary else []
 
     first_summary = wrapped[0] if wrapped else ""
-    first_line = "{:<{iw}}{:<{pw}}{:<{ew}}{}".format(
-        session_id, plan_mode, made_edits, first_summary,
-        iw=_SESSION_ID_WIDTH, pw=_PLAN_WIDTH, ew=_EDITS_WIDTH,
+    first_line = "{:<{tw}}{:<{iw}}{:<{pw}}{:<{ew}}{}".format(
+        timestamp, session_id, plan_mode, made_edits, first_summary,
+        tw=_TIMESTAMP_WIDTH, iw=_SESSION_ID_WIDTH, pw=_PLAN_WIDTH, ew=_EDITS_WIDTH,
     )
     lines = [first_line]
 
@@ -65,8 +66,8 @@ def _print_plain(rows):
 
     for row in rows:
         lines = format_row(
-            row["session_id"], row["plan_mode"], row["made_edits"],
-            row["summary"], summary_width,
+            row["timestamp"], row["session_id"], row["plan_mode"],
+            row["made_edits"], row["summary"], summary_width,
         )
         for line in lines:
             print(line)
@@ -91,8 +92,8 @@ def _curses_main(stdscr, rows):
         for row in rows:
             row_starts.append(len(all_lines))
             lines = format_row(
-                row["session_id"], row["plan_mode"], row["made_edits"],
-                row["summary"], summary_width,
+                row["timestamp"], row["session_id"], row["plan_mode"],
+                row["made_edits"], row["summary"], summary_width,
             )
             all_lines.extend(lines)
 
