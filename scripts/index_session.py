@@ -69,8 +69,7 @@ def _hook_main():
     continues_session = _resolve_continues_session(
         surface_dir, metadata.get("referenced_plan_paths", []), metadata.get("slug")
     )
-    if continues_session:
-        entry["continues_session"] = continues_session
+    entry["continues_session"] = continues_session
 
     # Append to index
     append_index_entry(surface_dir, entry)
@@ -179,8 +178,7 @@ def _index_single(session_id, project_dir, surface_dir, force):
     continues_session = _resolve_continues_session(
         surface_dir, metadata.get("referenced_plan_paths", []), metadata.get("slug")
     )
-    if continues_session:
-        entry["continues_session"] = continues_session
+    entry["continues_session"] = continues_session
 
     if force:
         replace_index_entry(surface_dir, entry)
@@ -238,8 +236,7 @@ def _backfill(project_dir, surface_dir, force, limit=None):
             continues_session = _resolve_continues_session(
                 surface_dir, metadata.get("referenced_plan_paths", []), metadata.get("slug")
             )
-            if continues_session:
-                entry["continues_session"] = continues_session
+            entry["continues_session"] = continues_session
 
             if force:
                 replace_index_entry(surface_dir, entry)
