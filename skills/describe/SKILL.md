@@ -63,6 +63,48 @@ Analyze all signals and produce a four-section PR description:
 
 For multi-session descriptions, narrate the reasoning arc across sessions chronologically. Bias toward the final session as authoritative since later sessions reflect the most current decisions.
 
+#### Examples
+
+The following examples illustrate the target output. The first includes all four sections; the second omits Tradeoffs because the development history contains no rejected alternatives or user-driven course corrections.
+
+<example>
+## Overview
+
+This PR adds rate limiting to the `/api/upload` endpoint. Unthrottled uploads caused memory pressure during traffic spikes, triggering OOM kills on two production instances last week.
+
+## Approach
+
+The rate limiter uses an in-memory sliding window keyed by authenticated user ID. Each request records a timestamp, and the window function counts requests within the trailing 60-second interval. Requests exceeding the threshold receive a 429 response with a `Retry-After` header.
+
+Authentication already runs as router-level middleware, so the user ID is available on the request context before the rate limiter executes. This avoids a second database lookup.
+
+## Tradeoffs
+
+The initial approach used a Redis-backed token bucket to support distributed rate limiting across instances. The developer rejected this direction because the application currently runs on a single instance and adding a Redis dependency increases infrastructure cost without immediate benefit.
+
+The revised approach uses in-memory tracking, which means rate limits do not synchronize across instances. If the application scales to multiple instances, a shared backing store becomes necessary. For the current single-instance deployment, in-memory tracking provides accurate limiting with zero external dependencies.
+
+## Review Focus
+
+The sliding window cleanup runs on every request rather than on a background timer. Under sustained high traffic, the cleanup loop iterates over a growing timestamp list. Verify that the pruning logic in `rate_limiter.py:48-62` bounds memory growth acceptably for the expected request volume.
+</example>
+
+<example>
+## Overview
+
+This PR consolidates form validation logic into a single `FormValidator` module. Five controllers previously duplicated field-level validation with slight inconsistencies, causing different error messages for the same invalid input depending on which form the user submitted.
+
+## Approach
+
+The `FormValidator` module defines a rule registry where each field name maps to a validation function and an error template. Controllers call `FormValidator.validate(params, :profile)` with a schema name instead of inlining checks. The schema name selects the relevant subset of rules, so controllers that share fields (email, phone) enforce identical constraints.
+
+Exploration of the existing controllers confirmed that all five use the same parameter naming conventions, making a shared registry feasible without renaming fields or adjusting form markup.
+
+## Review Focus
+
+The migration removes validation code from five controllers and replaces it with single-line `FormValidator` calls. Confirm that the test suite in `tests/test_form_validator.py` covers the edge cases each controller previously handled inline, particularly the postal code format variations in `AddressController`.
+</example>
+
 ### 5. Writing rules
 
 Follow these rules for the PR description text:
