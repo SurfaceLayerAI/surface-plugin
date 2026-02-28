@@ -1157,6 +1157,117 @@ class TestSessionCoalescing:
         assert "Child summary here" not in flat
 
 
+class TestHookLogging:
+    """Tests for stderr diagnostic logging in hook mode."""
+
+    def _run_hook(self, hook_input, env_extra=None):
+        """Run the hook script as a subprocess and return the result."""
+        env = os.environ.copy()
+        env.pop("SURFACE_INDEXING", None)
+        env["CLAUDE_PLUGIN_ROOT"] = PLUGIN_ROOT
+        if env_extra:
+            env.update(env_extra)
+        return sp.run(
+            [sys.executable, SCRIPT],
+            input=json.dumps(hook_input) if isinstance(hook_input, dict) else hook_input,
+            capture_output=True, text=True, env=env,
+        )
+
+    def test_log_recursion_guard(self):
+        """Recursion guard logs to stderr."""
+        env = os.environ.copy()
+        env["SURFACE_INDEXING"] = "1"
+        env["CLAUDE_PLUGIN_ROOT"] = PLUGIN_ROOT
+        result = sp.run(
+            [sys.executable, SCRIPT],
+            input="{}",
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert result.stdout.strip() == "{}"
+        assert "[surface] skipped session" in result.stderr
+        assert "already indexing" in result.stderr
+
+    def test_log_json_parse_error(self):
+        """Invalid JSON logs parse error to stderr."""
+        result = self._run_hook("not valid json{{{")
+        assert result.returncode == 0
+        assert result.stdout.strip() == "{}"
+        assert "[surface] skipped session" in result.stderr
+        assert "could not read session data" in result.stderr
+
+    def test_log_skip_reason(self, tmp_path):
+        """Skip reasons (non-terminal events) log to stderr."""
+        result = self._run_hook({
+            "session_id": "test-skip",
+            "reason": "prompt_input_exit",
+            "transcript_path": "/nonexistent",
+            "cwd": str(tmp_path),
+        })
+        assert result.returncode == 0
+        assert "[surface] skipped session test-skip" in result.stderr
+        assert "not a terminal event" in result.stderr
+
+    def test_log_transcript_not_found(self, tmp_path):
+        """Missing transcript after _should_index logs to stderr."""
+        # Use reason=logout to pass _should_index, but nonexistent transcript
+        result = self._run_hook({
+            "session_id": "test-no-file",
+            "reason": "logout",
+            "transcript_path": str(tmp_path / "nonexistent.jsonl"),
+            "cwd": str(tmp_path),
+        })
+        assert result.returncode == 0
+        assert "[surface] skipped session test-no-file" in result.stderr
+        assert "transcript file not found" in result.stderr
+
+    def test_log_clear_no_plan(self, tmp_path):
+        """reason=clear with no plan writes logs to stderr."""
+        transcript = tmp_path / "session.jsonl"
+        _make_transcript(transcript, [
+            {"type": "user", "timestamp": "2024-01-01T00:00:00Z",
+             "message": {"role": "user", "content": "Hello"}},
+        ])
+        result = self._run_hook({
+            "session_id": "test-clear-nop",
+            "reason": "clear",
+            "transcript_path": str(transcript),
+            "cwd": str(tmp_path),
+        })
+        assert result.returncode == 0
+        assert "[surface] skipped session test-clear-nop" in result.stderr
+        assert "/clear with no plan activity" in result.stderr
+
+    def test_log_no_substantive_content(self, tmp_path):
+        """Ambiguous reason with noise-only transcript logs to stderr."""
+        transcript = tmp_path / "session.jsonl"
+        _make_transcript(transcript, [
+            {"type": "user", "timestamp": "2024-01-01T00:00:00Z",
+             "message": {"role": "user", "content": "/compact"}},
+        ])
+        result = self._run_hook({
+            "session_id": "test-noise",
+            "reason": "other",
+            "transcript_path": str(transcript),
+            "cwd": str(tmp_path),
+        })
+        assert result.returncode == 0
+        assert "[surface] skipped session test-noise" in result.stderr
+        assert "no substantive user messages" in result.stderr
+
+    def test_log_no_transcript_ambiguous(self, tmp_path):
+        """Ambiguous reason with missing transcript logs to stderr."""
+        result = self._run_hook({
+            "session_id": "test-amb",
+            "reason": "other",
+            "transcript_path": "/nonexistent/path.jsonl",
+            "cwd": str(tmp_path),
+        })
+        assert result.returncode == 0
+        assert "[surface] skipped session test-amb" in result.stderr
+        assert "no transcript available" in result.stderr
+
+
 class TestSummarizerSubprocessTracking:
     """Tests for subprocess tracking and kill_all in summarizer."""
 

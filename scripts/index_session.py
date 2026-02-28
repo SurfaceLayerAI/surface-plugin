@@ -5,6 +5,7 @@ import os
 import json
 import re
 import argparse
+import functools
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -17,11 +18,25 @@ from lib.session_discovery import get_session_transcript_path, list_sessions
 from lib.index_builder import append_index_entry, load_index, replace_index_entry
 
 
+def _log(msg):
+    # type: (str) -> None
+    """Log a diagnostic message to stderr with [surface] prefix."""
+    print("[surface] {}".format(msg), file=sys.stderr)
+
+
+@functools.lru_cache(maxsize=1)
+def _is_hook_mode():
+    # type: () -> bool
+    """True when running as a SessionEnd hook (no CLI args)."""
+    return len(sys.argv) <= 1
+
+
 def main():
     if len(sys.argv) > 1:
         return _cli_main()
     # Hook mode: check recursion guard
     if os.environ.get("SURFACE_INDEXING"):
+        _log("skipped session — already indexing in another process")
         print("{}")
         sys.exit(0)
     return _hook_main()
@@ -33,6 +48,7 @@ def _hook_main():
     try:
         hook_input = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
+        _log("skipped session — could not read session data")
         print("{}")
         sys.exit(0)
 
@@ -46,6 +62,7 @@ def _hook_main():
     cwd = hook_input.get("cwd", "")
 
     if not transcript_path or not Path(transcript_path).exists():
+        _log("skipped session {} — transcript file not found".format(session_id))
         print("{}")
         sys.exit(0)
 
@@ -75,6 +92,7 @@ def _hook_main():
     # Append to index
     append_index_entry(surface_dir, entry)
 
+    _log("indexed session {}".format(session_id))
     print("{}")
 
 
@@ -367,8 +385,11 @@ def _should_index(hook_input):
     For ambiguous reasons ('other', missing), checks transcript for substance.
     """
     reason = hook_input.get("reason", "")
+    session_id = hook_input.get("session_id", "")
 
     if reason in _SKIP_REASONS:
+        if _is_hook_mode():
+            _log("skipped session {} — not a terminal event".format(session_id))
         return False
 
     if reason in _INDEX_REASONS:
@@ -377,15 +398,27 @@ def _should_index(hook_input):
     if reason in _PLAN_CHECK_REASONS:
         transcript_path = hook_input.get("transcript_path", "")
         if not transcript_path or not Path(transcript_path).exists():
+            if _is_hook_mode():
+                _log("skipped session {} — /clear with no transcript".format(session_id))
             return False
-        return _has_plan_content(Path(transcript_path))
+        if _has_plan_content(Path(transcript_path)):
+            return True
+        if _is_hook_mode():
+            _log("skipped session {} — /clear with no plan activity".format(session_id))
+        return False
 
     # Ambiguous reason: check transcript for substance
     transcript_path = hook_input.get("transcript_path", "")
     if not transcript_path or not Path(transcript_path).exists():
+        if _is_hook_mode():
+            _log("skipped session {} — no transcript available".format(session_id))
         return False
 
-    return _has_substantive_content(Path(transcript_path))
+    if _has_substantive_content(Path(transcript_path)):
+        return True
+    if _is_hook_mode():
+        _log("skipped session {} — no substantive user messages".format(session_id))
+    return False
 
 
 def _has_substantive_content(transcript_path):
