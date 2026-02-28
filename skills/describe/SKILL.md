@@ -72,16 +72,6 @@ Follow these rules for the PR description text:
 - Present tense
 - No weak openers ("There is", "It is", etc.)
 
-### 6. Present and offer to create PR
+### 6. Present result
 
-Display the generated PR description to the user. Then ask:
-
-> Create a pull request with this description? (Requires `gh` CLI)
-
-If the user confirms, run:
-
-```bash
-gh pr create --title "<concise title>" --body "<generated description>"
-```
-
-If the user declines, the description remains available for manual use.
+Display the generated PR description to the user.
