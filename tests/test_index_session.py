@@ -4,7 +4,9 @@ import sys
 import json
 import os
 import subprocess as sp
+import threading
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
@@ -1153,3 +1155,67 @@ class TestSessionCoalescing:
         flat = " ".join(result.stdout.split())
         assert "Root summary here" in flat
         assert "Child summary here" not in flat
+
+
+class TestSummarizerSubprocessTracking:
+    """Tests for subprocess tracking and kill_all in summarizer."""
+
+    def test_kill_all_kills_active_procs(self):
+        """kill_all sends SIGKILL to all tracked subprocesses."""
+        from lib.summarizer import _active_procs, _active_procs_lock, kill_all
+
+        mock_proc1 = MagicMock()
+        mock_proc2 = MagicMock()
+
+        with _active_procs_lock:
+            _active_procs.add(mock_proc1)
+            _active_procs.add(mock_proc2)
+        try:
+            kill_all()
+            mock_proc1.kill.assert_called_once()
+            mock_proc2.kill.assert_called_once()
+        finally:
+            with _active_procs_lock:
+                _active_procs.discard(mock_proc1)
+                _active_procs.discard(mock_proc2)
+
+    def test_kill_all_ignores_oserror(self):
+        """kill_all doesn't raise when proc.kill() fails."""
+        from lib.summarizer import _active_procs, _active_procs_lock, kill_all
+
+        mock_proc = MagicMock()
+        mock_proc.kill.side_effect = OSError("already dead")
+
+        with _active_procs_lock:
+            _active_procs.add(mock_proc)
+        try:
+            kill_all()  # should not raise
+            mock_proc.kill.assert_called_once()
+        finally:
+            with _active_procs_lock:
+                _active_procs.discard(mock_proc)
+
+    def test_popen_registered_and_unregistered(self):
+        """summarize_session registers and unregisters the Popen process."""
+        from lib.summarizer import _active_procs, _active_procs_lock, summarize_session
+
+        registered_during_communicate = []
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate.return_value = ("summary text", "")
+
+        def capture_registration(*args, **kwargs):
+            with _active_procs_lock:
+                registered_during_communicate.append(mock_proc in _active_procs)
+            return ("summary text", "")
+
+        mock_proc.communicate.side_effect = capture_registration
+
+        with patch("lib.summarizer.subprocess.Popen", return_value=mock_proc):
+            result = summarize_session({"user_messages": ["test"]}, "/fake")
+
+        assert result == "summary text"
+        assert registered_during_communicate == [True]
+        with _active_procs_lock:
+            assert mock_proc not in _active_procs

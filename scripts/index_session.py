@@ -12,7 +12,7 @@ PLUGIN_ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT", str(Path(__file__).resolve().
 sys.path.insert(0, os.path.join(PLUGIN_ROOT, "scripts"))
 
 from lib.transcript_reader import iter_entries, get_content_blocks, is_system_entry, extract_user_text
-from lib.summarizer import summarize_session
+from lib.summarizer import summarize_session, kill_all as _kill_summarizers
 from lib.session_discovery import get_session_transcript_path, list_sessions
 from lib.index_builder import append_index_entry, load_index, replace_index_entry
 
@@ -240,25 +240,31 @@ def _backfill(project_dir, surface_dir, force, limit=None):
         print("Indexing {} of {} session(s)...".format(len(to_index), len(sessions)))
     indexed_count = 0
 
-    with ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(to_index))) as pool:
-        futures = {
-            pool.submit(_process_session, session, surface_dir, PLUGIN_ROOT): session
-            for session in to_index
-        }
-        for future in as_completed(futures):
-            session = futures[future]
-            sid = session["session_id"]
-            indexed_count += 1
-            print("  [{}/{}] {}...".format(indexed_count, len(to_index), sid[:12]))
-            try:
-                entry = future.result()
-                if force:
-                    replace_index_entry(surface_dir, entry)
-                else:
-                    append_index_entry(surface_dir, entry)
-            except Exception as exc:
-                indexed_count -= 1
-                print("    Warning: failed to index {}: {}".format(sid, exc), file=sys.stderr)
+    try:
+        with ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(to_index))) as pool:
+            futures = {
+                pool.submit(_process_session, session, surface_dir, PLUGIN_ROOT): session
+                for session in to_index
+            }
+            for future in as_completed(futures):
+                session = futures[future]
+                sid = session["session_id"]
+                indexed_count += 1
+                print("  [{}/{}] {}...".format(indexed_count, len(to_index), sid[:12]))
+                try:
+                    entry = future.result()
+                    if force:
+                        replace_index_entry(surface_dir, entry)
+                    else:
+                        append_index_entry(surface_dir, entry)
+                except Exception as exc:
+                    indexed_count -= 1
+                    print("    Warning: failed to index {}: {}".format(sid, exc), file=sys.stderr)
+    except KeyboardInterrupt:
+        _kill_summarizers()
+        pool.shutdown(wait=False, cancel_futures=True)
+        print("\nInterrupted. Indexed {} session(s) before cancellation.".format(indexed_count))
+        return
 
     print("Done. Indexed {} session(s).".format(indexed_count))
 
@@ -302,6 +308,10 @@ def _list_sessions_with_status(project_dir, surface_dir):
                 plan_mode = True
             if made_edits is not True and child.get("made_edits"):
                 made_edits = True
+
+        # Skip indexed sessions that produced no edits and no plan writes
+        if indexed_entry and not made_edits and not plan_mode:
+            continue
 
         if plan_mode is not None:
             plan_str = "Yes" if plan_mode else "No"

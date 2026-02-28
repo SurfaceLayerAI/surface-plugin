@@ -4,7 +4,21 @@ import subprocess
 import os
 import json
 import re
+import threading
 from pathlib import Path
+
+_active_procs = set()
+_active_procs_lock = threading.Lock()
+
+
+def kill_all():
+    """Kill all active Claude subprocesses."""
+    with _active_procs_lock:
+        for proc in _active_procs:
+            try:
+                proc.kill()
+            except OSError:
+                pass
 
 
 def summarize_session(metadata, plugin_root):
@@ -16,16 +30,27 @@ def summarize_session(metadata, plugin_root):
         env = os.environ.copy()
         env["SURFACE_INDEXING"] = "1"
 
-        result = subprocess.run(
+        proc = subprocess.Popen(
             ["claude", "-p", prompt, "--model", "haiku", "--no-session-persistence"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=30,
             env=env,
         )
+        with _active_procs_lock:
+            _active_procs.add(proc)
+        try:
+            stdout, _ = proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise
+        finally:
+            with _active_procs_lock:
+                _active_procs.discard(proc)
 
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
+        if proc.returncode == 0 and stdout.strip():
+            return stdout.strip()
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         pass
 

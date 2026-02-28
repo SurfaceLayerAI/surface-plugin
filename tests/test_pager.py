@@ -2,10 +2,12 @@
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from lib.pager import format_row, _print_plain, _PREFIX_WIDTH
+import index_session
 
 
 class TestFormatRow:
@@ -80,3 +82,51 @@ class TestPrintPlain:
         captured = capsys.readouterr()
         assert "-" in captured.out
         assert "sess-003" in captured.out
+
+
+class TestListSessionsFiltering:
+    """Tests for empty/no-change session filtering in _list_sessions_with_status."""
+
+    def _run(self, sessions, index_entries):
+        """Run _list_sessions_with_status with mocked data, return plain output."""
+        with patch.object(index_session, "list_sessions", return_value=sessions), \
+             patch.object(index_session, "load_index", return_value=index_entries):
+            index_session._list_sessions_with_status("/fake/project", Path("/fake/surface"))
+
+    def test_filters_indexed_no_edits_no_plan(self, capsys):
+        """Indexed sessions with made_edits=false and plan_mode=false are excluded."""
+        sessions = [
+            {"session_id": "sess-active"},
+            {"session_id": "sess-empty"},
+            {"session_id": "sess-unindexed"},
+        ]
+        index_entries = [
+            {"session_id": "sess-active", "summary": "Did work", "made_edits": True, "plan_mode": False, "timestamp": "2026-01-01T00:00:00Z"},
+            {"session_id": "sess-empty", "summary": "Nothing", "made_edits": False, "plan_mode": False, "timestamp": "2026-01-01T00:00:00Z"},
+        ]
+        self._run(sessions, index_entries)
+        captured = capsys.readouterr()
+        assert "sess-active" in captured.out
+        assert "sess-empty" not in captured.out
+        # Unindexed sessions are still shown
+        assert "sess-unindexed" in captured.out
+
+    def test_keeps_indexed_with_plan_mode(self, capsys):
+        """Indexed sessions with plan_mode=true are kept even without edits."""
+        sessions = [{"session_id": "sess-plan"}]
+        index_entries = [
+            {"session_id": "sess-plan", "summary": "Planned", "made_edits": False, "plan_mode": True, "timestamp": "2026-01-01T00:00:00Z"},
+        ]
+        self._run(sessions, index_entries)
+        captured = capsys.readouterr()
+        assert "sess-plan" in captured.out
+
+    def test_keeps_indexed_with_edits(self, capsys):
+        """Indexed sessions with made_edits=true are kept even without plan mode."""
+        sessions = [{"session_id": "sess-edit"}]
+        index_entries = [
+            {"session_id": "sess-edit", "summary": "Edited", "made_edits": True, "plan_mode": False, "timestamp": "2026-01-01T00:00:00Z"},
+        ]
+        self._run(sessions, index_entries)
+        captured = capsys.readouterr()
+        assert "sess-edit" in captured.out
