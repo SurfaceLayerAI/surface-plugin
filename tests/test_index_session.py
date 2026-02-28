@@ -672,6 +672,30 @@ class TestCLIMode:
         entries = load_index(Path(project_dir) / ".surface")
         assert len(entries) == 2
 
+    def test_backfill_parallel(self, tmp_path):
+        """--backfill indexes >10 sessions in parallel and all are present in the index."""
+        project_dir = str(tmp_path / "myproject")
+        num_sessions = 15
+        for i in range(num_sessions):
+            _make_fake_session_dir(
+                tmp_path, project_dir, "sess-par-{:03d}".format(i), _SAMPLE_ENTRIES
+            )
+        env = _cli_env(tmp_path)
+
+        result = sp.run(
+            [sys.executable, SCRIPT, "--backfill", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "Done. Indexed {} session(s)".format(num_sessions) in result.stdout
+
+        from lib.index_builder import load_index
+        entries = load_index(Path(project_dir) / ".surface")
+        assert len(entries) == num_sessions
+        indexed_ids = {e["session_id"] for e in entries}
+        for i in range(num_sessions):
+            assert "sess-par-{:03d}".format(i) in indexed_ids
+
     def test_list_many_sessions_pipe(self, tmp_path):
         """--list in non-TTY mode shows all sessions (no truncation)."""
         project_dir = str(tmp_path / "myproject")

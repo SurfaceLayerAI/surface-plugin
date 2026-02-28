@@ -5,6 +5,7 @@ import os
 import json
 import re
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 PLUGIN_ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT", str(Path(__file__).resolve().parent.parent))
@@ -188,6 +189,31 @@ def _index_single(session_id, project_dir, surface_dir, force):
     print("Indexed: {} - {}".format(session_id, entry["summary"][:80]))
 
 
+_MAX_WORKERS = 10
+
+
+def _process_session(session, surface_dir, plugin_root):
+    # type: (dict, Path, str) -> dict
+    """Process a single session: extract metadata, summarize, resolve linkage."""
+    sid = session["session_id"]
+    transcript_path = session["path"]
+    metadata = _extract_metadata(transcript_path, sid)
+    metadata["summary"] = summarize_session(metadata, plugin_root)
+    entry = {
+        "session_id": sid,
+        "timestamp": metadata.get("timestamp_end", ""),
+        "summary": metadata["summary"],
+        "plan_mode": metadata.get("plan_mode", False),
+        "plan_paths": metadata.get("plan_paths", []),
+        "made_edits": metadata.get("made_edits", False),
+    }
+    continues_session = _resolve_continues_session(
+        surface_dir, metadata.get("referenced_plan_paths", []), metadata.get("slug")
+    )
+    entry["continues_session"] = continues_session
+    return entry
+
+
 def _backfill(project_dir, surface_dir, force, limit=None):
     # type: (str, Path, bool, int) -> None
     """Index all unindexed sessions for the project."""
@@ -214,38 +240,25 @@ def _backfill(project_dir, surface_dir, force, limit=None):
         print("Indexing {} of {} session(s)...".format(len(to_index), len(sessions)))
     indexed_count = 0
 
-    for i, session in enumerate(to_index, 1):
-        sid = session["session_id"]
-        transcript_path = session["path"]
-        print("  [{}/{}] {}...".format(i, len(to_index), sid[:12]))
-
-        try:
-            metadata = _extract_metadata(transcript_path, sid)
-            metadata["summary"] = summarize_session(metadata, PLUGIN_ROOT)
-
-            entry = {
-                "session_id": sid,
-                "timestamp": metadata.get("timestamp_end", ""),
-                "summary": metadata["summary"],
-                "plan_mode": metadata.get("plan_mode", False),
-                "plan_paths": metadata.get("plan_paths", []),
-                "made_edits": metadata.get("made_edits", False),
-            }
-
-            # Resolve session linkage
-            continues_session = _resolve_continues_session(
-                surface_dir, metadata.get("referenced_plan_paths", []), metadata.get("slug")
-            )
-            entry["continues_session"] = continues_session
-
-            if force:
-                replace_index_entry(surface_dir, entry)
-            else:
-                append_index_entry(surface_dir, entry)
-
+    with ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(to_index))) as pool:
+        futures = {
+            pool.submit(_process_session, session, surface_dir, PLUGIN_ROOT): session
+            for session in to_index
+        }
+        for future in as_completed(futures):
+            session = futures[future]
+            sid = session["session_id"]
             indexed_count += 1
-        except Exception as exc:
-            print("    Warning: failed to index {}: {}".format(sid, exc), file=sys.stderr)
+            print("  [{}/{}] {}...".format(indexed_count, len(to_index), sid[:12]))
+            try:
+                entry = future.result()
+                if force:
+                    replace_index_entry(surface_dir, entry)
+                else:
+                    append_index_entry(surface_dir, entry)
+            except Exception as exc:
+                indexed_count -= 1
+                print("    Warning: failed to index {}: {}".format(sid, exc), file=sys.stderr)
 
     print("Done. Indexed {} session(s).".format(indexed_count))
 
