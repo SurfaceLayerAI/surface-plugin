@@ -689,7 +689,6 @@ class TestCLIMode:
         for i in range(15):
             assert "sess-{:03d}".format(i) in result.stdout
 
-
 class TestSessionEndFiltering:
     """Tests for _should_index reason-based filtering."""
 
@@ -984,3 +983,149 @@ class TestSessionLinkage:
             surface_dir, ["/home/user/.claude/plans/unrelated-plan.md"]
         )
         assert result is None
+
+
+class TestSessionCoalescing:
+    """Tests for linked session coalescing in --list output."""
+
+    def _write_index(self, surface_dir, entries):
+        """Write pre-built index entries to session-index.jsonl."""
+        surface_dir.mkdir(parents=True, exist_ok=True)
+        with open(surface_dir / "session-index.jsonl", "w") as f:
+            for entry in entries:
+                f.write(json.dumps(entry) + "\n")
+
+    def test_linked_sessions_coalesced(self, tmp_path):
+        """Child session with continues_session is hidden; parent merges flags."""
+        project_dir = str(tmp_path / "myproject")
+        _make_fake_session_dir(tmp_path, project_dir, "plan-aaa", _SAMPLE_ENTRIES)
+        _make_fake_session_dir(tmp_path, project_dir, "edit-bbb", _SAMPLE_ENTRIES)
+
+        surface_dir = Path(project_dir) / ".surface"
+        self._write_index(surface_dir, [
+            {
+                "session_id": "plan-aaa",
+                "timestamp": "2024-06-01T10:00:00Z",
+                "summary": "Plan auth feature",
+                "plan_mode": True,
+                "made_edits": False,
+            },
+            {
+                "session_id": "edit-bbb",
+                "timestamp": "2024-06-01T11:00:00Z",
+                "summary": "Implement auth feature",
+                "plan_mode": False,
+                "made_edits": True,
+                "continues_session": "plan-aaa",
+            },
+        ])
+
+        env = _cli_env(tmp_path)
+        result = sp.run(
+            [sys.executable, SCRIPT, "--list", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "plan-aaa" in result.stdout
+        assert "edit-bbb" not in result.stdout
+        # Parent row should show merged flags: both Plan and Edits are Yes
+        for line in result.stdout.splitlines():
+            if "plan-aaa" in line:
+                assert line.count("Yes") >= 2
+                break
+        else:
+            raise AssertionError("plan-aaa row not found in output")
+
+    def test_self_referencing_not_coalesced(self, tmp_path):
+        """A session whose continues_session points to itself is not hidden."""
+        project_dir = str(tmp_path / "myproject")
+        _make_fake_session_dir(tmp_path, project_dir, "self-ref", _SAMPLE_ENTRIES)
+
+        surface_dir = Path(project_dir) / ".surface"
+        self._write_index(surface_dir, [
+            {
+                "session_id": "self-ref",
+                "timestamp": "2024-06-01T10:00:00Z",
+                "summary": "Self-referencing session",
+                "plan_mode": False,
+                "made_edits": True,
+                "continues_session": "self-ref",
+            },
+        ])
+
+        env = _cli_env(tmp_path)
+        result = sp.run(
+            [sys.executable, SCRIPT, "--list", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "self-ref" in result.stdout
+
+    def test_unlinked_sessions_not_affected(self, tmp_path):
+        """Sessions without continues_session all appear in --list output."""
+        project_dir = str(tmp_path / "myproject")
+        _make_fake_session_dir(tmp_path, project_dir, "standalone-aaa", _SAMPLE_ENTRIES)
+        _make_fake_session_dir(tmp_path, project_dir, "standalone-bbb", _SAMPLE_ENTRIES)
+
+        surface_dir = Path(project_dir) / ".surface"
+        self._write_index(surface_dir, [
+            {
+                "session_id": "standalone-aaa",
+                "timestamp": "2024-06-01T10:00:00Z",
+                "summary": "First standalone",
+                "plan_mode": False,
+                "made_edits": True,
+            },
+            {
+                "session_id": "standalone-bbb",
+                "timestamp": "2024-06-01T11:00:00Z",
+                "summary": "Second standalone",
+                "plan_mode": True,
+                "made_edits": False,
+            },
+        ])
+
+        env = _cli_env(tmp_path)
+        result = sp.run(
+            [sys.executable, SCRIPT, "--list", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "standalone-aaa" in result.stdout
+        assert "standalone-bbb" in result.stdout
+
+    def test_coalesced_uses_root_summary(self, tmp_path):
+        """Coalesced output shows the root session summary, not the child's."""
+        project_dir = str(tmp_path / "myproject")
+        _make_fake_session_dir(tmp_path, project_dir, "root-xxx", _SAMPLE_ENTRIES)
+        _make_fake_session_dir(tmp_path, project_dir, "child-yyy", _SAMPLE_ENTRIES)
+
+        surface_dir = Path(project_dir) / ".surface"
+        self._write_index(surface_dir, [
+            {
+                "session_id": "root-xxx",
+                "timestamp": "2024-06-01T10:00:00Z",
+                "summary": "Root summary here",
+                "plan_mode": True,
+                "made_edits": False,
+            },
+            {
+                "session_id": "child-yyy",
+                "timestamp": "2024-06-01T11:00:00Z",
+                "summary": "Child summary here",
+                "plan_mode": False,
+                "made_edits": True,
+                "continues_session": "root-xxx",
+            },
+        ])
+
+        env = _cli_env(tmp_path)
+        result = sp.run(
+            [sys.executable, SCRIPT, "--list", "--project-dir", project_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        # Summary may be line-wrapped in columnar output; collapse whitespace
+        flat = " ".join(result.stdout.split())
+        assert "Root summary here" in flat
+        assert "Child summary here" not in flat

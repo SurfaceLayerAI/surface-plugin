@@ -261,19 +261,42 @@ def _list_sessions_with_status(project_dir, surface_dir):
     existing = load_index(surface_dir)
     index_map = {e.get("session_id"): e for e in existing}
 
+    # Coalesce linked sessions: child sessions (those with continues_session
+    # pointing to a valid parent in the index) are merged into their parent row.
+    children_of = {}  # parent_id -> [child_entry, ...]
+    skip_ids = set()
+    for entry in existing:
+        parent_id = entry.get("continues_session")
+        sid = entry.get("session_id")
+        if parent_id and parent_id != sid and parent_id in index_map:
+            children_of.setdefault(parent_id, []).append(entry)
+            skip_ids.add(sid)
+
     rows = []
     for session in sessions:
         sid = session["session_id"]
+        if sid in skip_ids:
+            continue
         indexed_entry = index_map.get(sid)
         summary = indexed_entry.get("summary", "-") if indexed_entry else "-"
 
-        if indexed_entry and "plan_mode" in indexed_entry:
-            plan_str = "Yes" if indexed_entry["plan_mode"] else "No"
+        plan_mode = indexed_entry.get("plan_mode") if indexed_entry else None
+        made_edits = indexed_entry.get("made_edits") if indexed_entry else None
+
+        # Merge flags from children (OR logic)
+        for child in children_of.get(sid, []):
+            if plan_mode is not True and child.get("plan_mode"):
+                plan_mode = True
+            if made_edits is not True and child.get("made_edits"):
+                made_edits = True
+
+        if plan_mode is not None:
+            plan_str = "Yes" if plan_mode else "No"
         else:
             plan_str = "-"
 
-        if indexed_entry and "made_edits" in indexed_entry:
-            edits_str = "Yes" if indexed_entry["made_edits"] else "No"
+        if made_edits is not None:
+            edits_str = "Yes" if made_edits else "No"
         else:
             edits_str = "-"
 
