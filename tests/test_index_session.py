@@ -722,9 +722,29 @@ class TestSessionEndFiltering:
         from index_session import _should_index
         assert _should_index({"reason": "clear"}) is False
 
-    def test_skip_reason_prompt_input_exit(self):
+    def test_prompt_input_exit_with_substance(self, tmp_path):
         from index_session import _should_index
-        assert _should_index({"reason": "prompt_input_exit"}) is False
+        transcript = tmp_path / "session.jsonl"
+        _make_transcript(transcript, [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "Build the auth system"},
+            },
+        ])
+        assert _should_index({"reason": "prompt_input_exit", "transcript_path": str(transcript)}) is True
+
+    def test_prompt_input_exit_without_substance(self, tmp_path):
+        from index_session import _should_index
+        transcript = tmp_path / "session.jsonl"
+        _make_transcript(transcript, [
+            {
+                "type": "user",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "message": {"role": "user", "content": "/compact"},
+            },
+        ])
+        assert _should_index({"reason": "prompt_input_exit", "transcript_path": str(transcript)}) is False
 
     def test_skip_reason_bypass_permissions_disabled(self):
         from index_session import _should_index
@@ -1200,7 +1220,7 @@ class TestHookLogging:
         """Skip reasons (non-terminal events) log to stderr."""
         result = self._run_hook({
             "session_id": "test-skip",
-            "reason": "prompt_input_exit",
+            "reason": "bypass_permissions_disabled",
             "transcript_path": "/nonexistent",
             "cwd": str(tmp_path),
         })

@@ -370,7 +370,7 @@ def _list_sessions_with_status(project_dir, surface_dir):
 
 # --- SessionEnd reason filtering ---
 
-_SKIP_REASONS = frozenset(["prompt_input_exit", "bypass_permissions_disabled"])
+_SKIP_REASONS = frozenset(["bypass_permissions_disabled"])
 _PLAN_CHECK_REASONS = frozenset(["clear"])
 _INDEX_REASONS = frozenset(["logout"])
 
@@ -382,7 +382,8 @@ def _should_index(hook_input):
     Returns False for non-terminal events (permission changes).
     Returns True for definitive termination (logout).
     For plan-check reasons ('clear'), checks transcript for plan file writes.
-    For ambiguous reasons ('other', missing), checks transcript for substance.
+    For ambiguous reasons ('prompt_input_exit', 'other', missing), checks
+    transcript for substance.
     """
     reason = hook_input.get("reason", "")
     session_id = hook_input.get("session_id", "")
