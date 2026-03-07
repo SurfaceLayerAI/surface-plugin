@@ -1,8 +1,8 @@
 """Signal type constants and factory function."""
 
 USER_REQUEST = "user_request"
-PLAN_CONTENT = "plan_content"
-PLAN_REVISION = "plan_revision"
+PLAN_SNAPSHOT = "plan_snapshot"
+PLAN_DELTA = "plan_delta"
 USER_FEEDBACK = "user_feedback"
 THINKING_DECISION = "thinking_decision"
 EXPLORATION_CONTEXT = "exploration_context"

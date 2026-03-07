@@ -133,7 +133,7 @@ def test_extract_signals_end_to_end(tmp_path, monkeypatch):
 
     signal_types = {s["type"] for s in signals}
     assert "user_request" in signal_types
-    assert "plan_content" in signal_types
+    assert "plan_snapshot" in signal_types
     assert "thinking_decision" in signal_types
     assert "plan_agent_reasoning" in signal_types
 

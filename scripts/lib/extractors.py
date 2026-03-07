@@ -1,5 +1,6 @@
 """Signal extraction from transcripts."""
 
+import difflib
 import json
 import re
 
@@ -7,8 +8,8 @@ from lib.transcript_reader import iter_entries, get_content_blocks, is_system_en
 from lib.signal_types import (
     make_signal,
     USER_REQUEST,
-    PLAN_CONTENT,
-    PLAN_REVISION,
+    PLAN_SNAPSHOT,
+    PLAN_DELTA,
     USER_FEEDBACK,
     THINKING_DECISION,
     EXPLORATION_CONTEXT,
@@ -51,7 +52,7 @@ class MainTranscriptExtractor:
     """Extracts signals from the main session transcript."""
 
     def __init__(self):
-        self.plan_write_counts = {}  # path -> int
+        self._plan_writes = {}  # path -> list of {content, timestamp, tool_use_id}
         self.code_writing_started = False
         self.first_user_seen = False
         self.last_plan_tool_use_id = None
@@ -84,32 +85,20 @@ class MainTranscriptExtractor:
                 for block in blocks:
                     block_type = block.get("type")
 
-                    # Plan content / Plan revision
+                    # Buffer plan writes for post-processing
                     if block_type == "tool_use" and block.get("name") == "Write":
                         file_path = block.get("input", {}).get("file_path", "")
                         if "plan" in file_path.lower():
-                            self.plan_write_counts[file_path] = self.plan_write_counts.get(file_path, 0) + 1
-                            count = self.plan_write_counts[file_path]
                             block_id = block.get("id")
                             content = block.get("input", {}).get("content", "")
 
-                            if count == 1:
-                                signals.append(make_signal(
-                                    PLAN_CONTENT,
-                                    ts,
-                                    path=file_path,
-                                    content=content,
-                                    tool_use_id=block_id,
-                                ))
-                            else:
-                                signals.append(make_signal(
-                                    PLAN_REVISION,
-                                    ts,
-                                    path=file_path,
-                                    content=content,
-                                    revision_number=count - 1,
-                                    tool_use_id=block_id,
-                                ))
+                            if file_path not in self._plan_writes:
+                                self._plan_writes[file_path] = []
+                            self._plan_writes[file_path].append({
+                                "content": content,
+                                "timestamp": ts,
+                                "tool_use_id": block_id,
+                            })
 
                             self.last_plan_tool_use_id = block_id
                             self._last_plan_path = file_path
@@ -139,6 +128,42 @@ class MainTranscriptExtractor:
                             file_path = block.get("input", {}).get("file_path", "")
                             if "plan" not in file_path.lower():
                                 self.code_writing_started = True
+
+        signals.extend(self._finalize_plan_signals())
+        return signals
+
+    def _finalize_plan_signals(self):
+        """Emit plan_snapshot and plan_delta signals from buffered plan writes."""
+        signals = []
+        for path, writes in self._plan_writes.items():
+            # Emit one snapshot with the last write's data
+            last = writes[-1]
+            signals.append(make_signal(
+                PLAN_SNAPSHOT,
+                last["timestamp"],
+                path=path,
+                content=last["content"],
+                tool_use_id=last["tool_use_id"],
+            ))
+
+            # Emit deltas for consecutive pairs
+            for i in range(1, len(writes)):
+                old_content = writes[i - 1]["content"]
+                new_content = writes[i]["content"]
+                diff_lines = list(difflib.unified_diff(
+                    old_content.splitlines(keepends=True),
+                    new_content.splitlines(keepends=True),
+                    n=1,
+                ))
+                if diff_lines:
+                    signals.append(make_signal(
+                        PLAN_DELTA,
+                        writes[i]["timestamp"],
+                        path=path,
+                        diff="".join(diff_lines),
+                        revision_number=i,
+                        tool_use_id=writes[i]["tool_use_id"],
+                    ))
 
         return signals
 

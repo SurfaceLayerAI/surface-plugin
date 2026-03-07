@@ -8,8 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from lib.extractors import MainTranscriptExtractor, PlanSubagentExtractor
 from lib.signal_types import (
     USER_REQUEST,
-    PLAN_CONTENT,
-    PLAN_REVISION,
+    PLAN_SNAPSHOT,
+    PLAN_DELTA,
     USER_FEEDBACK,
     THINKING_DECISION,
     EXPLORATION_CONTEXT,
@@ -35,7 +35,7 @@ def test_extracts_user_request(write_jsonl):
     assert signals[0]["timestamp"] == "2026-01-01T00:00:00Z"
 
 
-def test_extracts_plan_content(write_jsonl):
+def test_extracts_plan_snapshot(write_jsonl):
     path = write_jsonl("t.jsonl", [
         {"type": "assistant", "timestamp": "2026-01-01T00:01:00Z", "message": {
             "role": "assistant",
@@ -46,14 +46,14 @@ def test_extracts_plan_content(write_jsonl):
         }},
     ])
     signals = MainTranscriptExtractor().extract(path)
-    plan_signals = [s for s in signals if s["type"] == PLAN_CONTENT]
+    plan_signals = [s for s in signals if s["type"] == PLAN_SNAPSHOT]
     assert len(plan_signals) == 1
     assert plan_signals[0]["path"] == "plans/design.md"
     assert plan_signals[0]["content"] == "# Design Plan"
     assert plan_signals[0]["tool_use_id"] == "toolu_001"
 
 
-def test_extracts_plan_revision(write_jsonl):
+def test_extracts_plan_delta(write_jsonl):
     path = write_jsonl("t.jsonl", [
         {"type": "assistant", "timestamp": "2026-01-01T00:01:00Z", "message": {
             "role": "assistant",
@@ -71,11 +71,80 @@ def test_extracts_plan_revision(write_jsonl):
         }},
     ])
     signals = MainTranscriptExtractor().extract(path)
-    revisions = [s for s in signals if s["type"] == PLAN_REVISION]
-    assert len(revisions) == 1
-    assert revisions[0]["revision_number"] == 1
-    assert revisions[0]["content"] == "v2"
-    assert revisions[0]["tool_use_id"] == "toolu_002"
+    snapshots = [s for s in signals if s["type"] == PLAN_SNAPSHOT]
+    assert len(snapshots) == 1
+    assert snapshots[0]["content"] == "v2"
+    assert snapshots[0]["tool_use_id"] == "toolu_002"
+
+    deltas = [s for s in signals if s["type"] == PLAN_DELTA]
+    assert len(deltas) == 1
+    assert deltas[0]["revision_number"] == 1
+    assert deltas[0]["tool_use_id"] == "toolu_002"
+    assert "v1" in deltas[0]["diff"]
+    assert "v2" in deltas[0]["diff"]
+
+
+def test_plan_snapshot_uses_final_timestamp(write_jsonl):
+    path = write_jsonl("t.jsonl", [
+        {"type": "assistant", "timestamp": "2026-01-01T00:01:00Z", "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "tool_use", "id": "toolu_001", "name": "Write",
+                "input": {"file_path": "plans/design.md", "content": "v1"},
+            }],
+        }},
+        {"type": "assistant", "timestamp": "2026-01-01T00:02:00Z", "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "tool_use", "id": "toolu_002", "name": "Write",
+                "input": {"file_path": "plans/design.md", "content": "v2"},
+            }],
+        }},
+        {"type": "assistant", "timestamp": "2026-01-01T00:03:00Z", "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "tool_use", "id": "toolu_003", "name": "Write",
+                "input": {"file_path": "plans/design.md", "content": "v3"},
+            }],
+        }},
+    ])
+    signals = MainTranscriptExtractor().extract(path)
+    snapshots = [s for s in signals if s["type"] == PLAN_SNAPSHOT]
+    assert len(snapshots) == 1
+    assert snapshots[0]["timestamp"] == "2026-01-01T00:03:00Z"
+    assert snapshots[0]["content"] == "v3"
+    assert snapshots[0]["tool_use_id"] == "toolu_003"
+
+
+def test_multiple_plan_deltas(write_jsonl):
+    path = write_jsonl("t.jsonl", [
+        {"type": "assistant", "timestamp": "2026-01-01T00:01:00Z", "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "tool_use", "id": "toolu_001", "name": "Write",
+                "input": {"file_path": "plans/design.md", "content": "v1"},
+            }],
+        }},
+        {"type": "assistant", "timestamp": "2026-01-01T00:02:00Z", "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "tool_use", "id": "toolu_002", "name": "Write",
+                "input": {"file_path": "plans/design.md", "content": "v2"},
+            }],
+        }},
+        {"type": "assistant", "timestamp": "2026-01-01T00:03:00Z", "message": {
+            "role": "assistant",
+            "content": [{
+                "type": "tool_use", "id": "toolu_003", "name": "Write",
+                "input": {"file_path": "plans/design.md", "content": "v3"},
+            }],
+        }},
+    ])
+    signals = MainTranscriptExtractor().extract(path)
+    deltas = [s for s in signals if s["type"] == PLAN_DELTA]
+    assert len(deltas) == 2
+    assert deltas[0]["revision_number"] == 1
+    assert deltas[1]["revision_number"] == 2
 
 
 def test_extracts_user_feedback(write_jsonl):

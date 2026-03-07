@@ -34,13 +34,13 @@ If the user accepts, run:
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/index_session.py --backfill --limit 10 --project-dir $PWD
 ```
 
-Then re-read `.surface/session-index.jsonl` and continue to Step 2. If the backfill produced no sessions, inform the user:
+Then re-read `.surface/session-index.jsonl` and continue to Step 2. 
 
-> No sessions found for this project. To describe a specific session directly, use: `/surface:describe <session-id>`
+If the backfill produced no sessions, inform the user:
 
-If the user declines, inform them:
+> No sessions found for this project. You should make changes with Claude Code before using Surface.
 
-> To describe a specific session directly, use: `/surface:describe <session-id>`
+Do not proceed to Step 2 in this case.
 
 ### 2. Ask which sessions to display
 
@@ -50,7 +50,7 @@ Use AskUserQuestion to ask the user which sessions to display. Four options:
 |--------|-------|-------------|
 | 1 | Plan mode with edits (Recommended) | Sessions where Claude deliberated on approach and made code changes — richest signals for PR descriptions |
 | 2 | Sessions with edits | All sessions that made code changes |
-| 3 | Plan mode sessions | Sessions that used plan mode |
+| 3 | Plan mode sessions without edits | Sessions that used plan mode |
 | 4 | All sessions | No filtering |
 
 ### 3. Filter and sort
