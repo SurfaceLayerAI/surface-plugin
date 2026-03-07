@@ -36,9 +36,12 @@ def summarize_session(metadata, plugin_root):
     try:
         env = os.environ.copy()
         env["SURFACE_INDEXING"] = "1"
+        env.pop("CLAUDECODE", None)
+        env.pop("CLAUDE_CODE_ENTRYPOINT", None)
 
         proc = subprocess.Popen(
             ["claude", "-p", prompt, "--model", "haiku", "--no-session-persistence"],
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -47,7 +50,7 @@ def summarize_session(metadata, plugin_root):
         with _active_procs_lock:
             _active_procs.add(proc)
         try:
-            stdout, _ = proc.communicate(timeout=30)
+            stdout, stderr = proc.communicate(timeout=30)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
@@ -58,6 +61,8 @@ def summarize_session(metadata, plugin_root):
 
         if proc.returncode == 0 and stdout.strip():
             return stdout.strip()
+        if stderr and stderr.strip():
+            _log("summarizer: {}".format(stderr.strip()[:200]))
     except FileNotFoundError:
         _log("summarizer: claude CLI not found, using structural fallback")
     except subprocess.TimeoutExpired:

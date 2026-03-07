@@ -1330,3 +1330,35 @@ class TestSummarizerSubprocessTracking:
         assert registered_during_communicate == [True]
         with _active_procs_lock:
             assert mock_proc not in _active_procs
+
+    def test_claudecode_env_stripped(self):
+        """CLAUDECODE and CLAUDE_CODE_ENTRYPOINT must be removed from subprocess env."""
+        from lib.summarizer import summarize_session
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate.return_value = ("summary text", "")
+
+        with patch.dict(os.environ, {"CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli"}):
+            with patch("lib.summarizer.subprocess.Popen", return_value=mock_proc) as mock_popen:
+                result = summarize_session({"user_messages": ["test"]}, "/fake")
+
+        call_kwargs = mock_popen.call_args[1]
+        assert "CLAUDECODE" not in call_kwargs["env"]
+        assert "CLAUDE_CODE_ENTRYPOINT" not in call_kwargs["env"]
+        assert call_kwargs["env"]["SURFACE_INDEXING"] == "1"
+        assert result == "summary text"
+
+    def test_stdin_devnull(self):
+        """Subprocess stdin must be DEVNULL to prevent blocking."""
+        from lib.summarizer import summarize_session
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate.return_value = ("summary", "")
+
+        with patch("lib.summarizer.subprocess.Popen", return_value=mock_proc) as mock_popen:
+            summarize_session({"user_messages": ["test"]}, "/fake")
+
+        call_kwargs = mock_popen.call_args[1]
+        assert call_kwargs["stdin"] == sp.DEVNULL
