@@ -1032,6 +1032,118 @@ class TestSessionLinkage:
         assert result is None
 
 
+class TestPropagateMadeEdits:
+    """Tests for propagating made_edits to parent sessions."""
+
+    def test_parent_updated_when_child_made_edits(self, tmp_path):
+        """Parent session gets made_edits=True when child has made_edits=True."""
+        from index_session import _propagate_made_edits
+        from lib.index_builder import append_index_entry, load_index
+
+        surface_dir = tmp_path / ".surface"
+        append_index_entry(surface_dir, {
+            "session_id": "plan-parent",
+            "timestamp": "2024-06-01T10:00:00Z",
+            "summary": "Plan feature",
+            "plan_mode": True,
+            "made_edits": False,
+        })
+
+        child_entry = {
+            "session_id": "impl-child",
+            "timestamp": "2024-06-01T11:00:00Z",
+            "summary": "Implement feature",
+            "plan_mode": False,
+            "made_edits": True,
+            "continues_session": "plan-parent",
+        }
+        append_index_entry(surface_dir, child_entry)
+        _propagate_made_edits(surface_dir, child_entry)
+
+        entries = load_index(surface_dir)
+        parent = next(e for e in entries if e["session_id"] == "plan-parent")
+        assert parent["made_edits"] is True
+
+    def test_parent_unchanged_when_child_has_no_edits(self, tmp_path):
+        """Parent session stays made_edits=False when child has made_edits=False."""
+        from index_session import _propagate_made_edits
+        from lib.index_builder import append_index_entry, load_index
+
+        surface_dir = tmp_path / ".surface"
+        append_index_entry(surface_dir, {
+            "session_id": "plan-parent",
+            "timestamp": "2024-06-01T10:00:00Z",
+            "summary": "Plan feature",
+            "plan_mode": True,
+            "made_edits": False,
+        })
+
+        child_entry = {
+            "session_id": "impl-child",
+            "timestamp": "2024-06-01T11:00:00Z",
+            "summary": "Research only",
+            "plan_mode": False,
+            "made_edits": False,
+            "continues_session": "plan-parent",
+        }
+        append_index_entry(surface_dir, child_entry)
+        _propagate_made_edits(surface_dir, child_entry)
+
+        entries = load_index(surface_dir)
+        parent = next(e for e in entries if e["session_id"] == "plan-parent")
+        assert parent["made_edits"] is False
+
+    def test_parent_already_true_stays_true(self, tmp_path):
+        """Parent with made_edits=True is not needlessly rewritten."""
+        from index_session import _propagate_made_edits
+        from lib.index_builder import append_index_entry, load_index
+
+        surface_dir = tmp_path / ".surface"
+        append_index_entry(surface_dir, {
+            "session_id": "plan-parent",
+            "timestamp": "2024-06-01T10:00:00Z",
+            "summary": "Plan feature",
+            "plan_mode": True,
+            "made_edits": True,
+        })
+
+        child_entry = {
+            "session_id": "impl-child",
+            "timestamp": "2024-06-01T11:00:00Z",
+            "summary": "More edits",
+            "plan_mode": False,
+            "made_edits": True,
+            "continues_session": "plan-parent",
+        }
+        append_index_entry(surface_dir, child_entry)
+        _propagate_made_edits(surface_dir, child_entry)
+
+        entries = load_index(surface_dir)
+        parent = next(e for e in entries if e["session_id"] == "plan-parent")
+        assert parent["made_edits"] is True
+
+    def test_no_continues_session_is_noop(self, tmp_path):
+        """Entry without continues_session does nothing."""
+        from index_session import _propagate_made_edits
+        from lib.index_builder import append_index_entry, load_index
+
+        surface_dir = tmp_path / ".surface"
+        append_index_entry(surface_dir, {
+            "session_id": "standalone",
+            "timestamp": "2024-06-01T10:00:00Z",
+            "summary": "Standalone session",
+            "made_edits": True,
+        })
+
+        _propagate_made_edits(surface_dir, {
+            "session_id": "standalone",
+            "made_edits": True,
+        })
+
+        entries = load_index(surface_dir)
+        assert len(entries) == 1
+
+
 class TestSessionCoalescing:
     """Tests for linked session coalescing in --list output."""
 

@@ -42,6 +42,20 @@ def main():
     return _hook_main()
 
 
+def _propagate_made_edits(surface_dir, entry):
+    # type: (Path, dict) -> None
+    """If entry continues a session and made edits, propagate made_edits to parent."""
+    parent_id = entry.get("continues_session")
+    if not parent_id or not entry.get("made_edits"):
+        return
+    entries = load_index(surface_dir)
+    for e in entries:
+        if e.get("session_id") == parent_id and not e.get("made_edits"):
+            e["made_edits"] = True
+            replace_index_entry(surface_dir, e)
+            break
+
+
 def _hook_main():
     """Hook mode: read session data from stdin and index it."""
     # Read hook input from stdin
@@ -91,6 +105,7 @@ def _hook_main():
 
     # Append to index
     append_index_entry(surface_dir, entry)
+    _propagate_made_edits(surface_dir, entry)
 
     _log("indexed session {}".format(session_id))
     print("{}")
@@ -204,6 +219,7 @@ def _index_single(session_id, project_dir, surface_dir, force):
     else:
         append_index_entry(surface_dir, entry)
 
+    _propagate_made_edits(surface_dir, entry)
     print("Indexed: {} - {}".format(session_id, entry["summary"][:80]))
 
 
@@ -275,6 +291,7 @@ def _backfill(project_dir, surface_dir, force, limit=None):
                         replace_index_entry(surface_dir, entry)
                     else:
                         append_index_entry(surface_dir, entry)
+                    _propagate_made_edits(surface_dir, entry)
                 except Exception as exc:
                     indexed_count -= 1
                     print("    Warning: failed to index {}: {}".format(sid, exc), file=sys.stderr)
