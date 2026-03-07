@@ -319,7 +319,8 @@ class TestIndexSession:
         _make_transcript(transcript_path, entries)
 
         # Subagent transcript: has a Write
-        subagents_dir = tmp_path / "subagents"
+        # subagents live under <session_id>/subagents/, i.e. transcript_path.with_suffix('') / "subagents"
+        subagents_dir = transcript_path.with_suffix('') / "subagents"
         subagent_entries = [
             {
                 "type": "assistant",

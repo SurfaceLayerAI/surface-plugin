@@ -66,7 +66,7 @@ def discover_plan_subagents(transcript_path: Path) -> List[Dict[str, Any]]:
 
     # Build results, filtering to only existing subagent files
     results = []
-    subagents_dir = transcript_path.parent / "subagents"
+    subagents_dir = transcript_path.with_suffix('') / "subagents"
     for agent_id in agent_ids:
         subagent_path = subagents_dir / ("agent-%s.jsonl" % agent_id)
         if subagent_path.exists():

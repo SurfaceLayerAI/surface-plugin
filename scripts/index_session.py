@@ -542,7 +542,7 @@ def _extract_metadata(transcript_path, session_id):
 
     # Fallback: check subagent transcripts for edits
     if not made_edits:
-        subagents_dir = transcript_path.parent / "subagents"
+        subagents_dir = transcript_path.with_suffix('') / "subagents"
         if subagents_dir.is_dir():
             for agent_file in sorted(subagents_dir.glob("agent-*.jsonl")):
                 for entry in iter_entries(agent_file):
