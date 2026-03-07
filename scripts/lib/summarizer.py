@@ -2,10 +2,17 @@
 
 import subprocess
 import os
+import sys
 import json
 import re
 import threading
 from pathlib import Path
+
+
+def _log(msg):
+    # type: (str) -> None
+    """Log a diagnostic message to stderr with [surface] prefix."""
+    print("[surface] {}".format(msg), file=sys.stderr)
 
 _active_procs = set()
 _active_procs_lock = threading.Lock()
@@ -51,8 +58,12 @@ def summarize_session(metadata, plugin_root):
 
         if proc.returncode == 0 and stdout.strip():
             return stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        pass
+    except FileNotFoundError:
+        _log("summarizer: claude CLI not found, using structural fallback")
+    except subprocess.TimeoutExpired:
+        _log("summarizer: timed out after 30s, using structural fallback")
+    except OSError as exc:
+        _log("summarizer: OS error ({}), using structural fallback".format(exc))
 
     return _structural_fallback(metadata)
 
