@@ -15,8 +15,8 @@ PLUGIN_ROOT = os.environ.get(
 sys.path.insert(0, os.path.join(PLUGIN_ROOT, "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib.session_discovery import get_session_transcript_path, discover_plan_subagents
-from lib.extractors import MainTranscriptExtractor, PlanSubagentExtractor
+from lib.session_discovery import get_session_transcript_path, discover_subagents
+from lib.extractors import MainTranscriptExtractor, SubagentExtractor
 
 
 def main():
@@ -47,17 +47,17 @@ def main():
         )
         sys.exit(1)
 
-    # Discover plan subagents
-    subagents = discover_plan_subagents(transcript_path)
+    # Discover subagents
+    subagents = discover_subagents(transcript_path)
 
     # Extract signals from main transcript
     main_signals = MainTranscriptExtractor().extract(transcript_path)
 
-    # Extract signals from plan subagents
+    # Extract signals from subagents
     subagent_signals = []
     for sa in subagents:
-        sa_signals = PlanSubagentExtractor().extract(
-            sa["subagent_path"], sa["agent_id"]
+        sa_signals = SubagentExtractor().extract(
+            sa["subagent_path"], sa["agent_id"], sa["subagent_type"]
         )
         subagent_signals.extend(sa_signals)
 
