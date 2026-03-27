@@ -10,9 +10,9 @@ Python scripts for signal extraction and session indexing. All stdlib-only, no p
   - **CLI mode** (with args): Retroactive indexing. Supports `--session-id <id>`, `--backfill`, `--list`, `--force`, `--project-dir`.
 - `lib/` — Shared modules:
   - `transcript_reader.py` — JSONL streaming parser, content block extraction, system entry detection
-  - `session_discovery.py` — Session path resolution, Plan subagent discovery via progress entries
-  - `signal_types.py` — Signal type constants and `make_signal` factory
-  - `extractors.py` — `MainTranscriptExtractor` and `PlanSubagentExtractor` classes
+  - `session_discovery.py` — Session path resolution, Subagent discovery via progress entries (all types)
+  - `signal_types.py` — Signal type constants (`design_reasoning`, `tradeoff`, `uncertainty`, `files_changed`, `subagent_summary`, and 4 others) and `make_signal` factory
+  - `extractors.py` — `MainTranscriptExtractor` and `SubagentExtractor` classes
   - `summarizer.py` — Builds prompt from `agents/indexer.md`, runs `claude -p`, falls back to structural summary
   - `index_builder.py` — Reads/writes `.surface/session-index.jsonl`. Provides `get_linked_sessions` for following `continues_session` links in both directions
   - `pager.py` — Interactive curses pager for `--list` output; plain-text fallback for non-TTY

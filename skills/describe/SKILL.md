@@ -55,11 +55,11 @@ Analyze all signals and produce a four-section PR description:
 
 **Overview**: What changed and why, in 1-3 sentences. Ground this in the `user_request` signals and final plan state.
 
-**Approach**: Key design decisions and what informed them. Draw from `plan_snapshot`, `thinking_decision`, `plan_agent_reasoning`, and `exploration_context` signals. Focus on decisions a reviewer needs to understand, not implementation mechanics.
+**Approach**: Key design decisions and what informed them. Draw from `plan_snapshot`, `design_reasoning`, and `subagent_summary` signals. Focus on decisions a reviewer needs to understand, not implementation mechanics.
 
-**Tradeoffs**: Alternatives the agent considered and rejected, especially where user feedback changed direction. This section has the highest value for reviewers. Draw from `plan_delta`, `user_feedback`, and `thinking_decision` signals. If no tradeoffs exist, omit this section rather than fabricating content.
+**Tradeoffs**: Alternatives the agent considered and rejected, especially where user feedback changed direction. This section has the highest value for reviewers. Draw from `plan_delta`, `user_feedback`, and `tradeoff` signals. If no tradeoffs exist, omit this section rather than fabricating content.
 
-**Review Focus**: Areas of uncertainty or complexity that deserve close attention. Identify from `thinking_decision` signals that express uncertainty, complex multi-step changes, or areas where the agent explored extensively before deciding.
+**Review Focus**: Areas of uncertainty or complexity that deserve close attention. Identify from `uncertainty` and `files_changed` signals. Focus on areas of doubt, risk, or complexity that deserve close reviewer attention.
 
 For multi-session descriptions, narrate the reasoning arc across sessions chronologically. Bias toward the final session as authoritative since later sessions reflect the most current decisions.
 
