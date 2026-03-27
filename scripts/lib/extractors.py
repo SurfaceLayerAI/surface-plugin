@@ -11,18 +11,40 @@ from lib.signal_types import (
     PLAN_SNAPSHOT,
     PLAN_DELTA,
     USER_FEEDBACK,
-    THINKING_DECISION,
-    EXPLORATION_CONTEXT,
-    PLAN_AGENT_REASONING,
-    PLAN_AGENT_EXPLORATION,
+    DESIGN_REASONING,
+    TRADEOFF,
+    UNCERTAINTY,
+    FILES_CHANGED,
+    SUBAGENT_SUMMARY,
 )
 
-DECISION_RE = re.compile(
-    r"alternative|tradeoff|instead|option|chose|decided|rejected|considered|approach",
+DESIGN_RE = re.compile(
+    r"(should|will|need to)\s+(use|create|implement|structure|organize|design)"
+    r"|architecture|pattern|module|component|interface"
+    r"|approach.*(because|since|given)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+TRADEOFF_RE = re.compile(
+    r"instead of|rather than|versus|vs\."
+    r"|rejected|discarded|ruled out"
+    r"|considered.*(but|however)"
+    r"|tradeoff|trade-off|downside|drawback"
+    r"|pros and cons|advantages|disadvantages",
+    re.IGNORECASE | re.DOTALL,
+)
+
+UNCERTAINTY_RE = re.compile(
+    r"not sure|uncertain|unclear"
+    r"|might (not |cause |break )"
+    r"|risk|concern|worry|caveat"
+    r"|TODO|FIXME|hack|workaround"
+    r"|revisit|reconsider",
     re.IGNORECASE,
 )
 
-EXPLORATION_TOOLS = ("Read", "Grep", "Glob", "Bash")
+MIN_THINKING_LENGTH = 200
+
 CODE_WRITE_TOOLS = ("Write", "Edit")
 
 
@@ -53,10 +75,10 @@ class MainTranscriptExtractor:
 
     def __init__(self):
         self._plan_writes = {}  # path -> list of {content, timestamp, tool_use_id}
-        self.code_writing_started = False
         self.first_user_seen = False
         self.last_plan_tool_use_id = None
         self._last_plan_path = None
+        self._file_changes = {}  # path -> operation ("Write" or "Edit")
 
     def extract(self, transcript_path):
         """Process entries from a transcript and return a list of signal dicts."""
@@ -71,14 +93,15 @@ class MainTranscriptExtractor:
                     self.first_user_seen = True
                     text = _extract_user_text(entry)
                     signals.append(make_signal(USER_REQUEST, ts, content=text))
-                elif self.last_plan_tool_use_id is not None and not self.code_writing_started:
+                elif self.last_plan_tool_use_id is not None:
                     text = _extract_user_text(entry)
-                    signals.append(make_signal(
-                        USER_FEEDBACK,
-                        ts,
-                        content=text,
-                        preceding_plan_path=self._last_plan_path,
-                    ))
+                    if text.strip():
+                        signals.append(make_signal(
+                            USER_FEEDBACK,
+                            ts,
+                            content=text,
+                            preceding_plan_path=self._last_plan_path,
+                        ))
 
             if entry_type == "assistant":
                 blocks = get_content_blocks(entry)
@@ -103,37 +126,63 @@ class MainTranscriptExtractor:
                             self.last_plan_tool_use_id = block_id
                             self._last_plan_path = file_path
 
-                    # Thinking decisions
-                    if block_type == "thinking" and not self.code_writing_started:
+                    # Track file changes (Write/Edit to non-plan files)
+                    if block_type == "tool_use" and block.get("name") in CODE_WRITE_TOOLS:
+                        file_path = block.get("input", {}).get("file_path", "")
+                        if "plan" not in file_path.lower() and file_path:
+                            self._file_changes[file_path] = block.get("name")
+
+                    # Thinking block classification
+                    if block_type == "thinking":
                         thinking_text = block.get("thinking", "")
-                        if DECISION_RE.search(thinking_text):
-                            signals.append(make_signal(
-                                THINKING_DECISION,
-                                ts,
-                                content=thinking_text,
-                            ))
+                        if len(thinking_text) >= MIN_THINKING_LENGTH:
+                            if DESIGN_RE.search(thinking_text):
+                                signals.append(make_signal(
+                                    DESIGN_REASONING,
+                                    ts,
+                                    content=thinking_text,
+                                ))
+                            if TRADEOFF_RE.search(thinking_text):
+                                signals.append(make_signal(
+                                    TRADEOFF,
+                                    ts,
+                                    content=thinking_text,
+                                ))
+                            if UNCERTAINTY_RE.search(thinking_text):
+                                signals.append(make_signal(
+                                    UNCERTAINTY,
+                                    ts,
+                                    content=thinking_text,
+                                ))
 
-                    # Exploration context (only before code writing starts)
-                    if block_type == "tool_use" and not self.code_writing_started:
-                        tool_name = block.get("name", "")
-                        if tool_name in EXPLORATION_TOOLS:
-                            input_summary = json.dumps(block.get("input", {}))[:200]
-                            signals.append(make_signal(
-                                EXPLORATION_CONTEXT,
-                                ts,
-                                tool_name=tool_name,
-                                input_summary=input_summary,
-                            ))
-                        elif tool_name in CODE_WRITE_TOOLS:
-                            file_path = block.get("input", {}).get("file_path", "")
-                            if "plan" not in file_path.lower():
-                                self.code_writing_started = True
+                    # Assistant text block classification
+                    if block_type == "text":
+                        text_content = block.get("text", "")
+                        if len(text_content) >= MIN_THINKING_LENGTH:
+                            if DESIGN_RE.search(text_content):
+                                signals.append(make_signal(
+                                    DESIGN_REASONING,
+                                    ts,
+                                    content=text_content,
+                                ))
+                            if TRADEOFF_RE.search(text_content):
+                                signals.append(make_signal(
+                                    TRADEOFF,
+                                    ts,
+                                    content=text_content,
+                                ))
+                            if UNCERTAINTY_RE.search(text_content):
+                                signals.append(make_signal(
+                                    UNCERTAINTY,
+                                    ts,
+                                    content=text_content,
+                                ))
 
-        signals.extend(self._finalize_plan_signals())
+        signals.extend(self._finalize_signals())
         return signals
 
-    def _finalize_plan_signals(self):
-        """Emit plan_snapshot and plan_delta signals from buffered plan writes."""
+    def _finalize_signals(self):
+        """Emit plan_snapshot, plan_delta, and files_changed signals."""
         signals = []
         for path, writes in self._plan_writes.items():
             # Emit one snapshot with the last write's data
@@ -165,13 +214,25 @@ class MainTranscriptExtractor:
                         tool_use_id=writes[i]["tool_use_id"],
                     ))
 
+        # Emit files_changed signal
+        if self._file_changes:
+            files = [
+                {"path": p, "operation": op}
+                for p, op in sorted(self._file_changes.items())
+            ]
+            signals.append(make_signal(
+                FILES_CHANGED,
+                "",
+                files=files,
+            ))
+
         return signals
 
 
-class PlanSubagentExtractor:
-    """Extracts signals from a plan subagent transcript."""
+class SubagentExtractor:
+    """Extracts signals from any subagent transcript."""
 
-    def extract(self, subagent_path, agent_id):
+    def extract(self, subagent_path, agent_id, subagent_type):
         """Process entries from a subagent transcript and return signal dicts."""
         signals = []
 
@@ -183,23 +244,13 @@ class PlanSubagentExtractor:
             blocks = get_content_blocks(entry)
 
             for block in blocks:
-                block_type = block.get("type")
-
-                if block_type == "text":
+                if block.get("type") == "text":
                     signals.append(make_signal(
-                        PLAN_AGENT_REASONING,
+                        SUBAGENT_SUMMARY,
                         ts,
                         agent_id=agent_id,
+                        subagent_type=subagent_type,
                         content=block.get("text", ""),
-                    ))
-                elif block_type == "tool_use" and block.get("name") in EXPLORATION_TOOLS:
-                    input_summary = json.dumps(block.get("input", {}))[:200]
-                    signals.append(make_signal(
-                        PLAN_AGENT_EXPLORATION,
-                        ts,
-                        agent_id=agent_id,
-                        tool_name=block.get("name"),
-                        input_summary=input_summary,
                     ))
 
         return signals

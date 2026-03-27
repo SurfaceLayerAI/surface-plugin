@@ -4,10 +4,11 @@ USER_REQUEST = "user_request"
 PLAN_SNAPSHOT = "plan_snapshot"
 PLAN_DELTA = "plan_delta"
 USER_FEEDBACK = "user_feedback"
-THINKING_DECISION = "thinking_decision"
-EXPLORATION_CONTEXT = "exploration_context"
-PLAN_AGENT_REASONING = "plan_agent_reasoning"
-PLAN_AGENT_EXPLORATION = "plan_agent_exploration"
+DESIGN_REASONING = "design_reasoning"
+TRADEOFF = "tradeoff"
+UNCERTAINTY = "uncertainty"
+FILES_CHANGED = "files_changed"
+SUBAGENT_SUMMARY = "subagent_summary"
 
 
 def make_signal(signal_type, timestamp, **kwargs):
