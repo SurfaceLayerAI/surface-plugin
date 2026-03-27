@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from lib.session_discovery import (
     get_project_slug,
     get_session_transcript_path,
-    discover_plan_subagents,
+    discover_subagents,
     list_sessions,
 )
 
@@ -26,7 +26,7 @@ def test_get_session_transcript_path():
     assert path == expected
 
 
-def test_discover_plan_subagents(tmp_session_dir):
+def test_discover_subagents(tmp_session_dir):
     # Write a transcript with a Plan Task and matching progress entry
     transcript = tmp_session_dir / "session.jsonl"
     entries = [
@@ -54,17 +54,97 @@ def test_discover_plan_subagents(tmp_session_dir):
         for e in entries:
             f.write(json.dumps(e) + "\n")
 
-    # Create the subagent file on disk
-    subagent_file = tmp_session_dir / "subagents" / "agent-agent_xyz.jsonl"
+    # discover_subagents looks for files at transcript.with_suffix('') / "subagents"
+    subagent_dir = tmp_session_dir / "session" / "subagents"
+    subagent_dir.mkdir(parents=True)
+    subagent_file = subagent_dir / "agent-agent_xyz.jsonl"
     subagent_file.write_text("")
 
-    result = discover_plan_subagents(transcript)
+    result = discover_subagents(transcript)
     assert len(result) == 1
     assert result[0]["agent_id"] == "agent_xyz"
     assert result[0]["subagent_path"] == subagent_file
+    assert result[0]["subagent_type"] == "Plan"
 
 
-def test_discover_plan_subagents_missing_file(tmp_session_dir):
+def test_discover_subagents_all_types(tmp_session_dir):
+    """Discovers subagents of any type, not just Plan."""
+    transcript = tmp_session_dir / "session.jsonl"
+    entries = [
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_code_001",
+                        "name": "Task",
+                        "input": {"subagent_type": "Code", "description": "Write code"},
+                    }
+                ],
+            },
+        },
+        {
+            "type": "progress",
+            "parentToolUseID": "toolu_code_001",
+            "data": {"agentId": "agent_code"},
+        },
+    ]
+    with open(transcript, "w") as f:
+        for e in entries:
+            f.write(json.dumps(e) + "\n")
+
+    subagent_dir = tmp_session_dir / "session" / "subagents"
+    subagent_dir.mkdir(parents=True, exist_ok=True)
+    subagent_file = subagent_dir / "agent-agent_code.jsonl"
+    subagent_file.write_text("")
+
+    result = discover_subagents(transcript)
+    assert len(result) == 1
+    assert result[0]["agent_id"] == "agent_code"
+    assert result[0]["subagent_type"] == "Code"
+
+
+def test_discover_subagents_default_type(tmp_session_dir):
+    """Tasks without subagent_type default to 'unknown'."""
+    transcript = tmp_session_dir / "session.jsonl"
+    entries = [
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_notype_001",
+                        "name": "Task",
+                        "input": {"description": "Do something"},
+                    }
+                ],
+            },
+        },
+        {
+            "type": "progress",
+            "parentToolUseID": "toolu_notype_001",
+            "data": {"agentId": "agent_notype"},
+        },
+    ]
+    with open(transcript, "w") as f:
+        for e in entries:
+            f.write(json.dumps(e) + "\n")
+
+    subagent_dir = tmp_session_dir / "session" / "subagents"
+    subagent_dir.mkdir(parents=True, exist_ok=True)
+    subagent_file = subagent_dir / "agent-agent_notype.jsonl"
+    subagent_file.write_text("")
+
+    result = discover_subagents(transcript)
+    assert len(result) == 1
+    assert result[0]["subagent_type"] == "unknown"
+
+
+def test_discover_subagents_missing_file(tmp_session_dir):
     transcript = tmp_session_dir / "session.jsonl"
     entries = [
         {
@@ -92,7 +172,7 @@ def test_discover_plan_subagents_missing_file(tmp_session_dir):
             f.write(json.dumps(e) + "\n")
 
     # Do NOT create the subagent file
-    result = discover_plan_subagents(transcript)
+    result = discover_subagents(transcript)
     assert result == []
 
 

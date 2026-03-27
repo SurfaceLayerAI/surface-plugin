@@ -28,14 +28,19 @@ def _make_transcript_entries():
             "role": "assistant",
             "content": [{
                 "type": "thinking",
-                "thinking": "I considered session tokens but decided JWT is better",
+                "thinking": (
+                    "I need to implement the authentication system. The architecture"
+                    " should use JWT tokens for stateless auth. This approach works"
+                    " because it avoids server-side session storage and scales"
+                    " horizontally across multiple instances without shared state."
+                ),
             }],
         }},
     ]
 
 
 def _make_subagent_entries():
-    """Return entries for a plan subagent transcript."""
+    """Return entries for a subagent transcript."""
     return [
         {"type": "assistant", "timestamp": "2026-01-01T00:00:30Z", "message": {
             "role": "assistant",
@@ -86,19 +91,15 @@ def test_extract_signals_end_to_end(tmp_path, monkeypatch):
     })
     _write_jsonl(transcript_path, main_entries)
 
-    # Write subagent transcript
-    subagents_dir = sessions_dir / "subagents"
-    subagents_dir.mkdir()
+    # Write subagent transcript (discover_subagents looks at transcript.with_suffix('') / subagents)
+    subagents_dir = sessions_dir / session_id / "subagents"
+    subagents_dir.mkdir(parents=True)
     subagent_path = subagents_dir / "agent-sa_001.jsonl"
     _write_jsonl(subagent_path, _make_subagent_entries())
 
     # Output dir
     output_dir = tmp_path / "output"
 
-    # Run the CLI via subprocess, passing HOME env var so Path.home() works
-    env = dict(monkeypatch._ENV_BACKUP) if hasattr(monkeypatch, '_ENV_BACKUP') else {}
-    # Use monkeypatch approach: run in-process instead of subprocess to honor monkeypatch
-    # Actually, subprocess won't see monkeypatch. We need to set HOME env var.
     import os
     env = os.environ.copy()
     env["HOME"] = str(fake_home)
@@ -134,8 +135,8 @@ def test_extract_signals_end_to_end(tmp_path, monkeypatch):
     signal_types = {s["type"] for s in signals}
     assert "user_request" in signal_types
     assert "plan_snapshot" in signal_types
-    assert "thinking_decision" in signal_types
-    assert "plan_agent_reasoning" in signal_types
+    assert "design_reasoning" in signal_types
+    assert "subagent_summary" in signal_types
 
     # Verify summary in stdout
     assert "Extracted" in result.stdout
